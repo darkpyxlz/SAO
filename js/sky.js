@@ -36,6 +36,7 @@
     // view: x0 = centre right ascension (rad), y0 = centre in map units, zoom relative to base scale
     const v = { x0: 1.4, y0: 0.1, zoom: 1.4 };
     let anim = null;
+    const focus = { x: 0.5, y: 0.5 }; // where a target lands on screen (fraction of the canvas), so a side panel does not cover it
 
     const sra = SKY.stars.map(s => s[1] * RAD), sY = SKY.stars.map(s => millerY(s[2]));
     const mra = SKY.messier.map(m => m.ra * RAD), mY = SKY.messier.map(m => millerY(m.dec));
@@ -79,8 +80,10 @@
       v.x0 += du - (cx - px) / scale; v.y0 += dv - (cy - py) / scale;
       clampView(); anim = null;
     }
-    function goTo(ra, dec, zoom, ms) {
-      anim = { t0: performance.now(), ms: ms || 700, from: { x0: v.x0, y0: v.y0, zoom: v.zoom }, to: { x0: ra * RAD, y0: millerY(dec), zoom: zoom || v.zoom } };
+    function goTo(ra, dec, zoom, ms, focused) {
+      const z = Math.max(minScale() / baseScale(), Math.min(45, zoom || v.zoom)), sc = z * baseScale();
+      const dx = focused ? (cx - focus.x * W) / sc : 0, dy = focused ? (cy - focus.y * H) / sc : 0; // keep the target clear of the panel
+      anim = { t0: performance.now(), ms: ms || 700, from: { x0: v.x0, y0: v.y0, zoom: v.zoom }, to: { x0: ra * RAD - dx, y0: millerY(dec) - dy, zoom: z } };
       anim.to.x0 = anim.from.x0 + wrap(anim.to.x0 - anim.from.x0);
     }
     function stepAnim() {
@@ -301,15 +304,15 @@
           ctx.setLineDash([]);
         }
       }
-      // buildable lanes from the selected star, and the reach of a selected hub
+      // buildable lanes from the selected star, and the reach of a selected regional building
       if (ui.sel && ui.sel.type === 'star' && S.stars[ui.sel.i]) {
         const si = ui.sel.i;
         ctx.setLineDash([3, 5]); ctx.strokeStyle = 'rgba(126,226,168,.5)'; ctx.lineWidth = 1.3;
         for (const bl of G.buildableLanes(si)) { ctx.beginPath(); lineBetween(si, bl.other); ctx.stroke(); }
         ctx.setLineDash([]);
-        const hub = S.hubs[si];
-        if (hub && D.coverage[si]) {
-          ctx.strokeStyle = G.HUB_TYPES[hub.type].color; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.55;
+        const regional = G.buildingsAt(si).find(b => G.BUILDINGS[b.id].regional);
+        if (regional && D.coverage[si]) {
+          ctx.strokeStyle = G.BUILDINGS[regional.id].color; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.55;
           for (const i of D.coverage[si]) { if (!svis[i]) continue; ctx.beginPath(); ctx.arc(sx[i], sy[i], 9 + Math.sin(t / 500 + i) * 1.2, 0, TAU); ctx.stroke(); }
           ctx.globalAlpha = 1;
         }
@@ -350,16 +353,31 @@
         if (claimed) {
           const s = S.stars[i];
           const lv = s.r + s.b + s.o;
-          const rings = Math.min(5, Math.floor(lv / 3)); // one ring per three upgrade levels
+          const slots = G.slotsAt(i), rings = Math.min(8, slots); // one ring per building slot (three development levels each)
+          const blds = G.buildingsAt(i);
           for (let k = 0; k < rings; k++) {
-            ctx.strokeStyle = 'rgba(255,' + (217 + 8 * k) + ',' + (138 + 24 * k) + ',' + (0.42 + 0.1 * k).toFixed(2) + ')';
-            ctx.lineWidth = k === 4 ? 1.6 : 1;
+            const used = k < blds.length;
+            ctx.strokeStyle = 'rgba(255,' + (217 + 4 * Math.min(k, 5)) + ',' + (138 + 18 * Math.min(k, 5)) + ',' + (used ? 0.55 : 0.34 + 0.05 * Math.min(k, 5)).toFixed(2) + ')';
+            ctx.lineWidth = used ? 1.2 : 1;
             ctx.beginPath(); ctx.arc(x, y, r + 3 + k * 2.6, 0, TAU); ctx.stroke();
           }
-          const hub = S.hubs[i];
-          if (hub) { // hexagon in the hub's colour
-            const hr = r + 5 + rings * 2.6 + 2;
-            ctx.strokeStyle = G.HUB_TYPES[hub.type].color; ctx.lineWidth = 1.2 + hub.lvl * 0.5; ctx.beginPath();
+          // every building is a small satellite orbiting on its own ring
+          if (v.zoom > 0.9) {
+            for (let k = 0; k < blds.length && k < rings; k++) {
+              const def = G.BUILDINGS[blds[k].id];
+              if (def.regional) continue;
+              const ang = t / (1800 + k * 450) * (k % 2 ? -1 : 1) + i * 0.7 + k * 2.1, rr = r + 3 + k * 2.6, sx0 = x + Math.cos(ang) * rr, sy0 = y + Math.sin(ang) * rr, q = 1.7 + blds[k].lvl * 0.45;
+              ctx.fillStyle = def.color; ctx.beginPath();
+              if (def.cat === 'industry') ctx.rect(sx0 - q, sy0 - q, 2 * q, 2 * q);
+              else if (def.cat === 'research') { ctx.moveTo(sx0, sy0 - q * 1.3); ctx.lineTo(sx0 + q * 1.3, sy0); ctx.lineTo(sx0, sy0 + q * 1.3); ctx.lineTo(sx0 - q * 1.3, sy0); ctx.closePath(); }
+              else { ctx.moveTo(sx0, sy0 - q * 1.3); ctx.lineTo(sx0 + q * 1.2, sy0 + q); ctx.lineTo(sx0 - q * 1.2, sy0 + q); ctx.closePath(); }
+              ctx.fill();
+            }
+          }
+          const reg = blds.find(b => G.BUILDINGS[b.id].regional);
+          if (reg) { // hexagon in the colour of the region-wide building
+            const hr = r + 6 + rings * 2.6;
+            ctx.strokeStyle = G.BUILDINGS[reg.id].color; ctx.lineWidth = 1.2 + reg.lvl * 0.5; ctx.beginPath();
             for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; ctx[k ? 'lineTo' : 'moveTo'](x + Math.cos(a) * hr, y + Math.sin(a) * hr); }
             ctx.closePath(); ctx.stroke();
           }
@@ -367,7 +385,7 @@
           if (cap > 0 && s.s >= cap * 0.9) {
             const pulse = 0.5 + 0.5 * Math.sin(t / 380 + i);
             ctx.strokeStyle = 'rgba(255,217,138,' + (0.5 + 0.4 * pulse).toFixed(2) + ')'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(x, y, r + 16 + pulse * 2, 0, TAU); ctx.stroke();
+            ctx.beginPath(); ctx.arc(x, y, r + 12 + rings * 2.6 + pulse * 2, 0, TAU); ctx.stroke();
           } else if (s.s + s.i > 0 && cap > 0 && s.s >= cap * 0.35) {
             ctx.fillStyle = 'rgba(255,217,138,.9)'; ctx.beginPath(); ctx.arc(x + r + 3, y - r - 3, 2, 0, TAU); ctx.fill();
           }
@@ -421,16 +439,22 @@
     }
     return {
       v, resize, render, pick, goTo, zoomBy: f => { v.zoom *= f; clampView(); anim = null; },
-      goStar(i, zoom) { const s = SKY.stars[i]; goTo(s[1], s[2], zoom || Math.max(v.zoom, 3.2)); },
+      goStar(i, zoom) { const s = SKY.stars[i]; goTo(s[1], s[2], zoom || Math.max(v.zoom, 3.2), 0, true); },
       goConst(c) {
         const ids = SKY.consts[c].stars;
         const f = fitTo(ids.map(i => sra[i]), ids.map(i => sY[i]));
         anim = { t0: performance.now(), ms: 700, from: { x0: v.x0, y0: v.y0, zoom: v.zoom }, to: { x0: f.ra * RAD, y0: f.y, zoom: f.zoom } };
         anim.to.x0 = anim.from.x0 + wrap(anim.to.x0 - anim.from.x0);
       },
-      goMessier(i) { const m = SKY.messier[i]; goTo(m.ra, m.dec, Math.max(v.zoom, 3.2)); },
+      goMessier(i) { const m = SKY.messier[i]; goTo(m.ra, m.dec, Math.max(v.zoom, 3.2), 0, true); },
+      setFocus(x, y) { focus.x = x; focus.y = y; },
       screenOf(i) { return { x: sx[i], y: sy[i], vis: svis[i] }; },
-      setView(ra, dec, zoom) { v.x0 = ra * RAD; v.y0 = millerY(dec); v.zoom = zoom; clampView(); },
+      setView(ra, dec, zoom, focused) {
+        v.zoom = zoom; clampView();
+        const sc = v.zoom * baseScale() || 300;
+        v.x0 = ra * RAD - (focused && W ? (cx - focus.x * W) / sc : 0); v.y0 = millerY(dec) - (focused && H ? (cy - focus.y * H) / sc : 0);
+        clampView(); anim = null;
+      },
     };
   }
 

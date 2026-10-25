@@ -2,7 +2,7 @@
   "name": "firmament",
   "version": "1.0.0",
   "private": true,
-  "description": "An incremental empire game on the real night sky.",
+  "description": "A corporate expansion game on the real night sky.",
   "type": "commonjs",
   "scripts": {
     "test": "node --test test/engine.test.mjs",
