@@ -7,9 +7,9 @@
 })(typeof self !== 'undefined' ? self : this, function (Corp) {
   'use strict';
 
-  const { BUILDINGS, BUILDING_MAX, BUILD_LEVEL_MUL, TECHS, TECH_BY_ID, TRAITS, RANKS, MARKETS } = Corp;
+  const { BUILDINGS, BUILDING_MAX, BUILD_LEVEL_MUL, TECHS, TECH_BY_ID, RANKS, MARKETS } = Corp;
   const RAD = Math.PI / 180;
-  const SAVE_VERSION = 4;
+  const SAVE_VERSION = 5;
   const TRACKS = ['r', 'b', 'o'];
   const TRACK_INFO = {
     r: { name: 'Industry', short: 'Ind', desc: 'More revenue from this colony.', base: 50, grow: 2.0 },
@@ -24,7 +24,7 @@
   const MASTER_LEVELS = 9; // ... and for a "mastered" one
 
   const CFG = {
-    startCash: 100, baseOutput: 0.095,
+    startCash: 100, baseOutput: 0.068,
     secPerDeg: 6,
     messierTravelMul: 1.5,
     baseSlots: 3,
@@ -44,8 +44,10 @@
     maxOfflineSeconds: 60 * 86400,
     logMax: 250,
     routeUpgradeBase: 60, routeUpgradeGrow: 2.4, routeBonusPerLevel: 0.5, routeSpeedPerLevel: 0.12,
-    laneCostMul: 0.7,
     buildingFloor: 0.25, demolishRefund: 0.5,
+    // flagships (the named stars): the colonies around one remit a share of their revenue to it, its vault holds a day's worth,
+    // it never auto-banks, and collecting there pays a premium. This is what keeps you coming back to the important stars.
+    royaltyShare: 0.25, flagshipCapH: 24, flagshipPremium: 0.2, flagshipReadyH: 4,
     marketFirstDelay: [600, 1200], marketGap: [1200, 2400], priceStepSecs: 10,
   };
   const ROUTE_MAX = 3;
@@ -53,6 +55,7 @@
   const PERK_LABEL = {
     out: v => '+' + pct(v) + ' revenue', speed: v => '−' + pct(v) + ' ship travel time', slots: v => '+' + v + ' fleet slot' + (v === 1 ? '' : 's'),
     res: v => '+' + pct(v) + ' research', cost: v => '−' + pct(v) + ' costs', cap: v => '+' + pct(v) + ' storage', ev: v => '+' + pct(v) + ' event rewards',
+    auto: v => '+' + pct(v) + ' of cash banked automatically', route: v => '+' + pct(v) + ' trade-route strength', star: v => '+' + pct(v) + ' star bonuses',
   };
   function pct(v) { return Math.round(v * 1000) / 10 + '%'; }
 
@@ -82,22 +85,17 @@
     const adj = Array.from({ length: N }, () => []);
     const edgeIdx = new Map();
     SKY.edges.forEach((e, i) => { edgeIdx.set(key(e[0], e[1]), i); });
-    const isBuildable = i => SKY.edges[i][2] === -2;
-    function rebuildAdj() { // routes in play = every figure line and hyperlane, plus buildable lanes the player has built
-      adj.forEach(a => { a.length = 0; });
-      SKY.edges.forEach((e, i) => { if (!isBuildable(i) || (S && S.built && S.built[i])) { adj[e[0]].push({ to: e[1], e: i }); adj[e[1]].push({ to: e[0], e: i }); } });
-    }
-    const edgeActive = i => !isBuildable(i) || !!S.built[i];
-    rebuildAdj();
+    SKY.edges.forEach((e, i) => { adj[e[0]].push({ to: e[1], e: i }); adj[e[1]].push({ to: e[0], e: i }); });
     const edgeLen = SKY.edges.map(e => sepDeg(SKY.stars[e[0]], SKY.stars[e[1]]));
     const cls = SKY.stars.map(s => (s[4] < 0.3 ? 0 : s[4] < 0.8 ? 1 : 2));
     const baseRate = SKY.stars.map((s, i) => CFG.baseOutput * Math.pow(10, -0.1 * s[3]) * CLASS_RATE[cls[i]]);
     const nameIdx = new Map(SKY.stars.map((s, i) => [s[6], i]));
-    // survey traits: deterministic per star, revealed when the star is colonised
-    const traits = SKY.stars.map((s, i) => Corp.genTraits(s[0], cls[i]));
-    const traitRev = traits.map(ts => ts.reduce((a, t) => a + (TRAITS[t].rev || 0), 0));
-    const traitRes = traits.map(ts => ts.reduce((a, t) => a + (TRAITS[t].res || 0), 0));
-    const traitCap = traits.map(ts => ts.reduce((a, t) => a + (TRAITS[t].cap || 0), 0));
+    // spectral class and brightness tier give every star a fixed bonus (see corp.js); the Academy's star topic strengthens them all
+    const profile = SKY.stars.map(st => Corp.starProfile(st));
+    // flagships: the named stars. Each colony remits part of its revenue to the nearest flagship you own, so that is where you must go.
+    const FLAGS = SKY.stars.map((st, i) => i).filter(i => SKY.stars[i][7]);
+    const isFlag = new Uint8Array(N); FLAGS.forEach(i => { isFlag[i] = 1; });
+    const sectorOrder = SKY.stars.map((st, i) => FLAGS.filter(f => f !== i).map(f => ({ f, d: sepDeg(st, SKY.stars[f]) })).sort((x, y) => x.d - y.d || x.f - y.f).map(x => x.f));
     // constellations that touch each other (for the codex)
     const consNeighbours = Array.from({ length: NC }, () => new Set());
     SKY.edges.forEach(e => {
@@ -110,8 +108,8 @@
     SKY.messier.forEach((m, i) => m.links.forEach(s => messierFrom[s].push(i)));
 
 
-    function blankStats() { return { collected: 0, auto: 0, claimed: 0, launched: 0, upgrades: 0, eventsDone: 0, perfect: 0, restoredRoutes: 0, petitionsDone: 0, collects: 0, routeUps: 0, lanes: 0, built: 0, buildUps: 0, techs: 0, demolished: 0, marketEvents: 0 }; }
-    function blankQuiz() { return { const: {}, star: {}, messier: {}, stats: { answered: 0, correct: 0, rounds: 0, perfect: 0, bestStreak: 0 } }; }
+    function blankStats() { return { collected: 0, auto: 0, claimed: 0, launched: 0, upgrades: 0, eventsDone: 0, perfect: 0, restoredRoutes: 0, petitionsDone: 0, collects: 0, routeUps: 0, built: 0, buildUps: 0, techs: 0, demolished: 0, marketEvents: 0, flagCollects: 0, flagCash: 0 }; }
+    function blankQuiz() { return { const: {}, star: {}, messier: {}, astro: {}, stats: { answered: 0, correct: 0, rounds: 0, perfect: 0, bestStreak: 0 } }; }
     function blankMarket() { return { kind: null, remaining: 0, nextIn: rand(CFG.marketFirstDelay), price: 10, hi: 10, hist: [10], priceTimer: 0 }; }
     function blankState(home, corpName) {
       return {
@@ -120,7 +118,7 @@
         corp: { name: corpName || Corp.defaultCompanyName(SKY.stars[home][6]), founded: nowFn(), rank: 0 },
         tech: { done: { telescope: nowFn() }, active: null },
         market: blankMarket(),
-        stars: {}, fleets: [], orders: [], messier: {}, devConst: {}, masterConst: {}, buildings: {}, built: {}, routeLvl: {}, quests: { claimed: {}, contracts: [], seq: 0 },
+        stars: {}, fleets: [], orders: [], messier: {}, devConst: {}, masterConst: {}, buildings: {}, routeLvl: {}, quests: { claimed: {}, contracts: [], seq: 0 },
         events: [], eventTimer: rand(CFG.eventFirstDelay), petitions: [], petitionTimer: rand(CFG.petitionGap),
         notes: {}, quiz: blankQuiz(), log: [], evSeq: 0, petitionSeq: 0, fleetSeq: 0, orderSeq: 0,
         stats: blankStats(),
@@ -136,7 +134,6 @@
 
     function newGame(home, corpName) {
       S = blankState(home, corpName && String(corpName).trim().slice(0, 32));
-      rebuildAdj();
       S.stars[home] = { t: nowFn(), s: 0, i: 0, r: 0, b: 0, o: 0 };
       log(S.corp.name + ' is founded. Headquarters: ' + SKY.stars[home][6] + ' in ' + SKY.consts[SKY.stars[home][5]].name + '.', 'claim');
       recalc();
@@ -169,6 +166,14 @@
         state.tech = { done, active: null };
         state.version = 4;
       }
+      if (state.version === 4) { // buildable trade lanes were retired: refund them and forget their route upgrades
+        state.laneRefund = Object.keys(state.built || {}).length;
+        delete state.built;
+        const maxEdge = SKY.edges.length;
+        for (const k of Object.keys(state.routeLvl || {})) if (+k >= maxEdge) delete state.routeLvl[k];
+        if (state.stats) delete state.stats.lanes;
+        state.version = 5;
+      }
       return state;
     }
     function load(state) {
@@ -176,7 +181,8 @@
       if (!state || state.version !== SAVE_VERSION) throw new Error('Unsupported save');
       S = state;
       if (!S.quiz) S.quiz = blankQuiz();
-      S.buildings = S.buildings || {}; S.built = S.built || {}; S.routeLvl = S.routeLvl || {};
+      S.quiz.astro = S.quiz.astro || {};
+      S.buildings = S.buildings || {}; S.routeLvl = S.routeLvl || {};
       S.quests = S.quests || { claimed: {}, contracts: [], seq: 0 };
       S.stats = Object.assign(blankStats(), S.stats);
       S.corp = Object.assign({ name: Corp.defaultCompanyName(SKY.stars[S.home][6]), founded: S.created || nowFn(), rank: 0 }, S.corp);
@@ -184,8 +190,12 @@
       if (!S.tech.done) S.tech.done = {};
       S.tech.done.telescope = S.tech.done.telescope || nowFn();
       S.market = Object.assign(blankMarket(), S.market);
-      rebuildAdj();
       recalc();
+      if (S.laneRefund) { // saves from before the retirement of trade lanes
+        const back = S.laneRefund * Math.ceil(claimCost() * 0.8);
+        S.cash += back; log('Trade lanes were retired. Your ' + S.laneRefund + ' lane' + (S.laneRefund === 1 ? '' : 's') + ' were refunded: $' + fmt(back) + '.', 'info');
+        delete S.laneRefund;
+      }
       return S;
     }
 
@@ -194,7 +204,7 @@
     function lvl(i) { const s = S.stars[i]; return s ? s.r + s.b + s.o : 0; }
 
     function perks() {
-      const p = { out: 0, speed: 0, slots: 0, res: 0, cost: 0, cap: 0, ev: 0 };
+      const p = { out: 0, speed: 0, slots: 0, res: 0, cost: 0, cap: 0, ev: 0, auto: 0, route: 0, star: 0 };
       for (const k of Object.keys(S.messier)) {
         const m = SKY.messier[k];
         const [kind, v] = MESSIER_PERK[m.kind];
@@ -253,7 +263,7 @@
         if (S.masterConst[c]) outBonus += CFG.masterBonus;
       }
       // buildings
-      const auto = new Float32Array(N), tradeMul = new Float32Array(N).fill(1), labMul = new Float32Array(N).fill(1), yardSpeed = new Float32Array(N);
+      const regAuto = new Float32Array(N), tradeMul = new Float32Array(N).fill(1), labMul = new Float32Array(N).fill(1), yardSpeed = new Float32Array(N);
       const revB = new Float32Array(N), resB = new Float32Array(N), speedB = new Float32Array(N), stockB = new Float32Array(N);
       const coverage = {};
       let yardSlots = 0, launchSlots = 0, discount = 0, buildingCount = 0;
@@ -268,7 +278,7 @@
           if (def.regional) {
             const cov = hubCoverage(i, L + 1, dis);
             coverage[i] = coverage[i] ? [...new Set(coverage[i].concat(cov))] : cov;
-            if (b.id === 'clearing') { const e = [0, 0.5, 0.7, 0.9][L]; for (const j of cov) auto[j] = Math.max(auto[j], e); }
+            if (b.id === 'clearing') { const e = [0, 0.5, 0.7, 0.9][L]; for (const j of cov) regAuto[j] = Math.max(regAuto[j], e); }
             else if (b.id === 'shipyard') { yardSlots += L; for (const j of cov) yardSpeed[j] = Math.max(yardSpeed[j], 0.1 * L); }
             else if (b.id === 'campus') { for (const j of cov) labMul[j] = Math.max(labMul[j], 1 + 0.35 * L); }
             else if (b.id === 'exchange') { for (const j of cov) tradeMul[j] = Math.max(tradeMul[j], 1 + 0.3 * L); }
@@ -281,35 +291,50 @@
       P.cost += discount;
       const globalOut = 1 + outBonus + P.out + M.rev;
       const resMul = 1 + P.res + M.res;
+      const starK = 1 + P.star; // the Academy's star-classification topic strengthens every spectral and brightness bonus
       const rate = new Float64Array(N), resRate = new Float64Array(N), cap = new Float64Array(N);
       const routeMul = new Float64Array(N).fill(1);
       let routes = 0;
       SKY.edges.forEach((e, i) => {
-        if (!edgeActive(i)) return;
         const [a, b] = e;
         const A = S.stars[a], B = S.stars[b];
         if (!A || !B || dis[i]) return;
         routes++;
-        const comp = (cls[a] !== cls[b] ? CFG.routeBonusComp : CFG.routeBonusSame) * (1 + CFG.routeBonusPerLevel * (S.routeLvl[i] || 0));
-        routeMul[a] += comp * (1 + CFG.routeBeaconMul * B.b) * tradeMul[a];
-        routeMul[b] += comp * (1 + CFG.routeBeaconMul * A.b) * tradeMul[b];
+        const comp = (cls[a] !== cls[b] ? CFG.routeBonusComp : CFG.routeBonusSame) * (1 + CFG.routeBonusPerLevel * (S.routeLvl[i] || 0)) * (1 + P.route);
+        routeMul[a] += comp * (1 + CFG.routeBeaconMul * B.b) * tradeMul[a] * (1 + profile[a].route * starK);
+        routeMul[b] += comp * (1 + CFG.routeBeaconMul * A.b) * tradeMul[b] * (1 + profile[b].route * starK);
       });
       let totalRate = 0, totalRes = 0, beacons = 0;
       for (const i of claimed) {
         const s = S.stars[i];
-        rate[i] = baseRate[i] * (1 + 0.5 * s.r) * routeMul[i] * globalOut * Math.max(0.2, 1 + revB[i] + traitRev[i]);
-        resRate[i] = (CFG.researchPerLevel * s.o + resB[i] + traitRes[i]) * resMul * labMul[i];
-        cap[i] = CLASS_CAP_H[cls[i]] * 3600 * (1 + P.cap) * (1 + stockB[i] + traitCap[i]);
+        rate[i] = baseRate[i] * (1 + 0.5 * s.r) * routeMul[i] * globalOut * Math.max(0.2, 1 + revB[i] + profile[i].rev * starK);
+        resRate[i] = (CFG.researchPerLevel * s.o + resB[i] + profile[i].res * starK) * resMul * labMul[i];
+        cap[i] = (isFlag[i] ? CFG.flagshipCapH : CLASS_CAP_H[cls[i]]) * 3600 * (1 + P.cap) * (1 + stockB[i] + profile[i].cap * starK);
         totalRate += rate[i]; totalRes += resRate[i]; beacons += s.b;
       }
+      // where the money lands: an ordinary colony remits a share to the nearest flagship you own, and what it keeps can be banked
+      // automatically (Treasury technologies plus any Clearing House); a flagship's vault never is, so it must be visited
+      const homeOf = new Int16Array(N).fill(-1), tribs = {}, accr = new Float64Array(N), auto = new Float32Array(N), autoRes = new Float32Array(N);
+      const anyFlag = FLAGS.some(f => S.stars[f]);
+      for (const i of claimed) {
+        if (isFlag[i]) { accr[i] += rate[i]; continue; }
+        let h = -1;
+        if (anyFlag) for (const f of sectorOrder[i]) if (S.stars[f]) { h = f; break; }
+        if (h >= 0) { homeOf[i] = h; accr[i] += rate[i] * (1 - CFG.royaltyShare); accr[h] += rate[i] * CFG.royaltyShare; (tribs[h] = tribs[h] || []).push(i); }
+        else accr[i] += rate[i];
+        auto[i] = 1 - (1 - P.auto) * (1 - regAuto[i]);
+        autoRes[i] = regAuto[i];
+      }
+      let manual = 0; for (const i of claimed) manual += accr[i] * (1 - auto[i]);
+      const manualShare = totalRate > 0 ? manual / totalRate : 1; // the part of your income that waits for a visit
       const slots = CFG.baseSlots + Math.floor(beacons / 5 + P.slots + yardSlots + launchSlots + 1e-9);
-      D = { claimed, P, M, dis, rate, resRate, cap, auto, yardSpeed, speedB, revB, coverage, routeMul, routes, totalRate, totalRes, slots, globalOut, resMul, buildingCount, count: claimed.length };
+      D = { claimed, P, M, dis, rate, resRate, cap, auto, autoRes, accr, homeOf, tribs, manualShare, starK, yardSpeed, speedB, revB, coverage, routeMul, routes, totalRate, totalRes, slots, globalOut, resMul, buildingCount, count: claimed.length };
       // promotions
       const rk = rankInfo();
       if (rk.idx > (S.corp.rank || 0)) { S.corp.rank = rk.idx; log('Promotion! ' + S.corp.name + ' is now a ' + rk.title + '.', 'rank'); }
     }
-    const stockCap = i => D.rate[i] * D.cap[i] * (1 - D.auto[i]);
-    const resCap = i => D.resRate[i] * D.cap[i] * (1 - D.auto[i]);
+    const stockCap = i => D.accr[i] * D.cap[i] * (1 - D.auto[i]);
+    const resCap = i => D.resRate[i] * D.cap[i] * (1 - D.autoRes[i]);
 
     // ---- corporation: rank, valuation and share price
     function rankInfo() {
@@ -365,7 +390,7 @@
     }
     function travelSeconds(fromStar, deg, messier, edge) {
       const routeSpeed = edge !== undefined ? CFG.routeSpeedPerLevel * (S.routeLvl[edge] || 0) : 0;
-      const reduce = Math.min(1 - CFG.speedFloor, D.P.speed + D.M.speed + CFG.beaconSpeed * S.stars[fromStar].b + D.yardSpeed[fromStar] + D.speedB[fromStar] + routeSpeed);
+      const reduce = Math.min(1 - CFG.speedFloor, D.P.speed + D.M.speed + CFG.beaconSpeed * S.stars[fromStar].b + D.yardSpeed[fromStar] + D.speedB[fromStar] + profile[fromStar].speed * D.starK + routeSpeed);
       return Math.max(5, deg * CFG.secPerDeg * (messier ? CFG.messierTravelMul : 1) * (1 - reduce));
     }
 
@@ -487,7 +512,7 @@
       const mul = BUILD_LEVEL_MUL[L], floor = claimCost() * CFG.buildingFloor;
       let cash;
       if (def.payback) { // industry: costs what the extra revenue earns back in `payback` hours
-        const base = D.rate[i] / Math.max(0.2, 1 + D.revB[i] + traitRev[i]);
+        const base = D.rate[i] / Math.max(0.2, 1 + D.revB[i] + profile[i].rev * D.starK);
         cash = Math.max(floor, def.rev * base * 3600 * def.payback) * mul;
       } else cash = claimCost() * def.costMul * mul;
       return { cash: Math.ceil(cash), research: Math.ceil(def.rp * mul * (1 + 0.02 * D.count) * costMul()), next: L + 1 };
@@ -588,8 +613,10 @@
     const techCount = () => Object.keys(S.tech.done).length;
 
     // ---- surveys: what a colonised star turned out to hold
-    const traitsOf = i => traits[i];
-    function surveyText(i) { return traits[i].length ? traits[i].map(t => TRAITS[t].name + ' (' + TRAITS[t].text + ')').join(', ') : 'Nothing remarkable'; }
+    const profileOf = i => profile[i];
+    const isFlagship = i => !!isFlag[i];
+    const sectorOf = i => (D.homeOf[i] >= 0 ? D.homeOf[i] : -1);
+    const tributaries = f => D.tribs[f] || [];
 
     // ---- market conditions: random, timed, only while you are playing
     function startMarket() {
@@ -599,7 +626,7 @@
       recalc();
     }
 
-    // ---- route upgrades and new lanes
+    // ---- route upgrades
     function routeLevel(e) { return S.routeLvl[e] || 0; }
     function routeUpgradeCost(e) {
       const L = routeLevel(e);
@@ -608,7 +635,7 @@
     }
     function canUpgradeRoute(e) {
       const ed = SKY.edges[e];
-      if (!ed || !edgeActive(e)) return result(false, 'No route here.');
+      if (!ed) return result(false, 'No route here.');
       if (!S.stars[ed[0]] || !S.stars[ed[1]]) return result(false, 'Both stars must be colonised.');
       if (D.dis[e]) return result(false, 'This route is cut right now.');
       const c = routeUpgradeCost(e);
@@ -625,52 +652,29 @@
       recalc();
       return result(true, 'Route level ' + S.routeLvl[e] + '.');
     }
-    function laneCost(e) { return Math.ceil(claimCost() * CFG.laneCostMul * (0.5 + edgeLen[e] / 6)); }
-    function canBuildLane(e) {
-      const ed = SKY.edges[e];
-      if (!ed || !isBuildable(e)) return result(false, 'Not a buildable lane.');
-      if (S.built[e]) return result(false, 'Already built.');
-      if (!S.stars[ed[0]] || !S.stars[ed[1]]) return result(false, 'Both stars must be colonised.');
-      if (S.cash < laneCost(e)) return result(false, 'Needs $' + fmt(laneCost(e)) + '.');
-      return result(true);
-    }
-    function buildLane(e) {
-      const chk = canBuildLane(e);
-      if (!chk.ok) return chk;
-      S.cash -= laneCost(e);
-      S.built[e] = nowFn(); S.stats.lanes++;
-      rebuildAdj();
-      const ed = SKY.edges[e];
-      log('Built a new trade lane between ' + SKY.stars[ed[0]][6] + ' and ' + SKY.stars[ed[1]][6] + '.', 'hub');
-      recalc();
-      return result(true, 'Lane built.');
-    }
-    function buildableLanes(i) { // lanes at star i that could be built now
-      const out = [];
-      for (let e = 0; e < SKY.edges.length; e++) {
-        if (!isBuildable(e) || S.built[e]) continue;
-        const ed = SKY.edges[e];
-        if ((ed[0] === i && S.stars[ed[1]]) || (ed[1] === i && S.stars[ed[0]])) out.push({ e, other: ed[0] === i ? ed[1] : ed[0], deg: edgeLen[e] });
-      }
-      return out.sort((a, b) => a.deg - b.deg);
-    }
 
     function collect(i) {
       const s = S.stars[i];
       if (!s) return result(false, 'Not colonised.', { gain: 0, res: 0 });
-      const gain = s.s, res = s.i;
-      if (gain < 0.01 && res < 0.01) return result(false, 'Nothing to collect.', { gain: 0, res: 0 });
+      const base = s.s, res = s.i;
+      if (base < 0.01 && res < 0.01) return result(false, 'Nothing to collect.', { gain: 0, res: 0 });
+      const flag = !!isFlag[i], bonus = flag ? base * CFG.flagshipPremium : 0, gain = base + bonus; // a flagship pays a dividend premium
       S.cash += gain; S.research += res; s.s = 0; s.i = 0;
       S.stats.collected += gain; S.stats.collects++;
-      completePetitions({ type: 'collect', star: i, fraction: capFraction(i, gain) });
-      return result(true, '', { gain, res });
+      if (flag) { S.stats.flagCollects++; S.stats.flagCash += gain; }
+      completePetitions({ type: 'collect', star: i, fraction: capFraction(i, base) });
+      return result(true, '', { gain, res, bonus, flagship: flag });
     }
     function capFraction(i, gain) { const cap = stockCap(i); return cap > 0 ? gain / cap : 0; }
     function collectConstellation(c) {
-      let gain = 0, res = 0;
-      for (const i of SKY.consts[c].stars) { const s = S.stars[i]; if (s) { gain += s.s; res += s.i; S.stats.collected += s.s; S.stats.collects++; s.s = 0; s.i = 0; } }
+      let gain = 0, res = 0, kept = 0;
+      for (const i of SKY.consts[c].stars) {
+        const s = S.stars[i]; if (!s) continue;
+        if (isFlag[i]) { if (s.s > 0) kept++; continue; } // a flagship keeps its own books: it has to be visited
+        gain += s.s; res += s.i; S.stats.collected += s.s; S.stats.collects++; s.s = 0; s.i = 0;
+      }
       S.cash += gain; S.research += res;
-      return result(true, '', { gain, res });
+      return result(true, '', { gain, res, kept });
     }
     function canCollectConstellation(c) { return !!S.devConst[c]; }
 
@@ -717,7 +721,7 @@
     const COMET_NAMES = ['Aurelia', 'Boreas', 'Calypso', 'Dione', 'Elara', 'Faye', 'Galatea', 'Hesper', 'Iris', 'Juno', 'Kestrel', 'Lyra', 'Maia', 'Nerine', 'Orla', 'Pavo'];
     function activeEdges() {
       const out = [];
-      SKY.edges.forEach((e, i) => { if (edgeActive(i) && S.stars[e[0]] && S.stars[e[1]] && !D.dis[i]) out.push(i); });
+      SKY.edges.forEach((e, i) => { if (S.stars[e[0]] && S.stars[e[1]] && !D.dis[i]) out.push(i); });
       return out;
     }
     function spawnEvent() {
@@ -794,12 +798,13 @@
     function accrue(dt) {
       let w = 0, wi = 0;
       for (const i of D.claimed) {
-        const s = S.stars[i], e = D.auto[i];
-        const r = D.rate[i] * dt, ir = D.resRate[i] * dt;
-        if (e > 0) { w += r * e; wi += ir * e; } // banked straight into the wallet by a Collection Hub
+        const s = S.stars[i], e = D.auto[i], er = D.autoRes[i];
+        const r = D.accr[i] * dt, ir = D.resRate[i] * dt;
+        if (e > 0) w += r * e;   // cash banked straight into the wallet (Treasury technologies, Clearing House)
+        if (er > 0) wi += ir * er; // research only by a Clearing House
         const cap = stockCap(i), icap = resCap(i);
         if (s.s < cap) s.s = Math.min(cap, s.s + r * (1 - e));
-        if (s.i < icap) s.i = Math.min(icap, s.i + ir * (1 - e));
+        if (s.i < icap) s.i = Math.min(icap, s.i + ir * (1 - er));
       }
       if (w > 0 || wi > 0) { S.cash += w; S.research += wi; S.stats.auto += w; }
     }
@@ -814,7 +819,8 @@
             S.stars[f.to] = { t: nowFn(), s: 0, i: 0, r: 0, b: 0, o: 0 };
             S.stats.claimed++;
             const st = SKY.stars[f.to];
-            log('Colonised ' + st[6] + ' (' + SKY.consts[st[5]].name + '). Survey: ' + surveyText(f.to) + '.', 'claim');
+            const pf = profile[f.to];
+            log('Colonised ' + st[6] + ' (' + SKY.consts[st[5]].name + '), a class ' + pf.letter + ' star' + (pf.tier ? ' of ' + pf.tier.name.toLowerCase() + ' brightness' : '') + (isFlag[f.to] ? ' and a new flagship' : '') + '.', 'claim');
             completePetitions({ type: 'claim', star: f.to });
           }
         } else if (!S.messier[f.to]) {
@@ -887,14 +893,15 @@
       for (const i of D.claimed) for (const n of adj[i]) if (!S.stars[n.to]) out.add(n.to);
       return out;
     }
-    function attention() { // stars worth a visit, the most cash waiting first
+    function attention() { // stars worth a visit: flagships first, then the most cash waiting
       const out = [];
       for (const i of D.claimed) {
         const s = S.stars[i];
         const cap = stockCap(i);
-        if (cap > 0 && s.s >= cap * 0.9) out.push({ star: i, why: 'full', cash: s.s });
+        if (isFlag[i]) { if (D.accr[i] > 0 && s.s >= CFG.flagshipReadyH * 3600 * D.accr[i]) out.push({ star: i, why: 'flagship', cash: s.s }); }
+        else if (cap > 0 && s.s >= cap * 0.9) out.push({ star: i, why: 'full', cash: s.s });
       }
-      return out.sort((a, b) => b.cash - a.cash || a.star - b.star);
+      return out.sort((a, b) => (a.why === 'flagship' ? 0 : 1) - (b.why === 'flagship' ? 0 : 1) || b.cash - a.cash || a.star - b.star); // flagships first
     }
 
     // ---- ordered lists shared by the panels and the keyboard shortcuts, so a key always does what the row it names does
@@ -907,7 +914,8 @@
         const mine = list.filter(t => adj[near].some(n => n.to === t));
         if (mine.length) list = mine;
       }
-      return list.sort((a, b) => baseRate[b] - baseRate[a] || a - b);
+      const worth = t => baseRate[t] * Math.max(0.2, 1 + profile[t].rev);
+      return list.sort((a, b) => worth(b) - worth(a) || a - b);
     }
     function messierTargets() { // Messier objects in reach that are not yet surveyed, brightest first
       const out = [];
@@ -927,16 +935,16 @@
     }
 
     return {
-      SKY, CFG, Corp, BUILDINGS, BUILDING_MAX, TECHS, TECH_BY_ID, TRAITS, MARKETS, RANKS, TRACKS, TRACK_INFO, MAX_LEVEL, CLASS_NAMES, DEV_LEVELS, MASTER_LEVELS, PERK_LABEL, MESSIER_PERK, ROUTE_MAX,
-      adj, edgeIdx, edgeLen, cls, baseRate, consNeighbours, messierByConst, messierFrom, nameIdx, traitsOf, traitRev, traitRes,
+      SKY, CFG, Corp, BUILDINGS, BUILDING_MAX, TECHS, TECH_BY_ID, MARKETS, RANKS, TRACKS, TRACK_INFO, MAX_LEVEL, CLASS_NAMES, DEV_LEVELS, MASTER_LEVELS, PERK_LABEL, MESSIER_PERK, ROUTE_MAX,
+      adj, edgeIdx, edgeLen, cls, baseRate, consNeighbours, messierByConst, messierFrom, nameIdx, profileOf, isFlagship, sectorOf, tributaries, FLAGS,
       get state() { return S; }, get d() { return D; },
       newGame, load, recalc, tick, catchUp,
       claimCost, upgradeCost, messierCost, developMessierCost, travelSeconds,
       canLaunchTo, launch, cancelOrder, dispatch, frontierOrigins, targetsPending, canVisitMessier, visitMessier, messierAccess, developMessier,
       upgrade, collect, collectConstellation, canCollectConstellation, grant, stockCap, resCap,
       buildingsAt, buildingAt, slotsAt, buildingCost, canBuild, build, canDemolish, demolish, buildingSummary, allBuildings, hubCoverage,
-      techStatus, techCost, canStartTech, startTech, techCount, surveyText, rankInfo, valuation, priceTarget, setCorpName,
-      routeLevel, routeUpgradeCost, canUpgradeRoute, upgradeRoute, laneCost, canBuildLane, buildLane, buildableLanes, edgeActive, isBuildable,
+      techStatus, techCost, canStartTech, startTech, techCount, rankInfo, valuation, priceTarget, setCorpName,
+      routeLevel, routeUpgradeCost, canUpgradeRoute, upgradeRoute,
       spawnEvent, redraw, useHint, eventReward, dismissPetition, addPetition,
       consStatus, frontier, attention, expansionTargets, messierTargets, buildOptions, messierStats, lvl, fmt, sepDeg,
       serialize() { S.saved = nowFn(); return JSON.stringify(S); },

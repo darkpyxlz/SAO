@@ -78,6 +78,20 @@
       q.options = opts; q.answer = opts.indexOf(correctOpt);
       return q;
     }
+    // photo questions: wrong answers that look like the right one. The better you know an object, the more alike they are:
+    // at first one is of the same type (another globular cluster...), then two, and once it is nearly learned all three.
+    const NO_NAME = new Set(['4 Star asterism', 'Milky Way patch']); // names that do not tell you what the photo shows
+    const hasName = m => !!SKY.messier[m].alt && !NO_NAME.has(SKY.messier[m].alt);
+    function lookalikes(m, k, named) {
+      const r = rec('messier', m), box = r ? r.box || 0 : 0, M = SKY.messier[m];
+      const pool = allMessier.filter(x => x !== m && (!named || hasName(x)));
+      const same = pool.filter(x => SKY.messier[x].tname === M.tname), other = pool.filter(x => SKY.messier[x].tname !== M.tname);
+      const want = Math.min(same.length, box < 2 ? 1 : box < 5 ? 2 : k);
+      const out = sample(same, want, null);
+      out.push(...sample(other.concat(same.filter(x => !out.includes(x))), k - out.length, null));
+      return out.slice(0, k);
+    }
+    const messierLabel = M => (M.alt ? 'the ' + M.alt + ' (M' + M.n + ')' : 'M' + M.n);
     function maskLore(c) {
       const t = SKY.consts[c].lore, k = t.indexOf(',');
       return k > 0 ? '…' + t.slice(k) : t;
@@ -177,6 +191,26 @@
         const q = { kind: 'm-const', cat: 'messier', subject: { cat: 'messier', id: m }, prompt: 'Which constellation holds ' + (M.alt ? 'the ' + M.alt + ' (M' + M.n + ')' : 'M' + M.n) + '?', visual: null };
         return finish(q, opt(SKY.consts[M.c].name), constDistractors(M.c, 3).map(x => opt(SKY.consts[x].name)));
       },
+      'm-pic-num'() {
+        const m = sample(allMessier, 1, wMessier)[0], M = SKY.messier[m];
+        const q = { kind: 'm-pic-num', cat: 'messier', subject: { cat: 'messier', id: m }, prompt: 'Which Messier object is this?', visual: { type: 'messier', m } };
+        return finish(q, opt('M' + M.n), lookalikes(m, 3).map(x => opt('M' + SKY.messier[x].n)));
+      },
+      'm-pic-name'() {
+        const m = sample(allMessier.filter(hasName), 1, wMessier)[0], M = SKY.messier[m];
+        const q = { kind: 'm-pic-name', cat: 'messier', subject: { cat: 'messier', id: m }, prompt: 'What is this object called?', visual: { type: 'messier', m } };
+        return finish(q, opt(M.alt), lookalikes(m, 3, true).map(x => opt(SKY.messier[x].alt)));
+      },
+      'm-num-pic'() {
+        const m = sample(allMessier, 1, wMessier)[0], M = SKY.messier[m];
+        const q = { kind: 'm-num-pic', cat: 'messier', subject: { cat: 'messier', id: m }, prompt: 'Which picture shows M' + M.n + '?', visual: null };
+        return finish(q, opt('M' + M.n, { type: 'messier', m }), lookalikes(m, 3).map(x => opt('M' + SKY.messier[x].n, { type: 'messier', m: x })));
+      },
+      'm-name-pic'() {
+        const m = sample(allMessier.filter(hasName), 1, wMessier)[0], M = SKY.messier[m];
+        const q = { kind: 'm-name-pic', cat: 'messier', subject: { cat: 'messier', id: m }, prompt: 'Which picture shows the ' + M.alt + '?', visual: null };
+        return finish(q, opt(M.alt + ' (M' + M.n + ')', { type: 'messier', m }), lookalikes(m, 3, true).map(x => opt(SKY.messier[x].alt + ' (M' + SKY.messier[x].n + ')', { type: 'messier', m: x })));
+      },
       'm-alt-num'() {
         const withAlt = allMessier.filter(m => SKY.messier[m].alt);
         const m = sample(withAlt, 1, wMessier)[0];
@@ -189,7 +223,7 @@
     const KINDS = {
       const: ['const-figure', 'const-pick', 'const-lore', 'const-neighbour'],
       star: ['star-marked', 'star-colour', 'star-brighter', 'star-const'],
-      messier: ['m-pic-type', 'm-type-pic', 'm-name-type', 'm-const', 'm-alt-num'],
+      messier: ['m-pic-type', 'm-pic-num', 'm-pic-name', 'm-num-pic', 'm-name-pic', 'm-type-pic', 'm-name-type', 'm-const', 'm-alt-num'],
     };
 
     function explain(q) {
@@ -311,7 +345,7 @@
       });
     }
     function learnedTotal() { return ['const', 'star', 'messier'].reduce((n, c) => n + Object.values(Q()[c]).filter(r => r.learned).length, 0); }
-    return { ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS, KINDS, question, startRound, answer, learned, boxOf, isDue, progress, items, learnedTotal, rewardBase, typeNames, named };
+    return { ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS, KINDS, build: kind => { const q = BUILD[kind](); if (q) q.explain = explain(q); return q; }, question, startRound, answer, learned, boxOf, isDue, progress, items, learnedTotal, rewardBase, typeNames, named };
   }
   return { create, ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS };
 });

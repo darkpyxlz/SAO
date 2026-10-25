@@ -3,8 +3,9 @@
 A corporate expansion game on the real night sky. Play it in the browser: **https://darkpyxlz.github.io/SAO/**
 
 You run a space corporation. Start with headquarters on one star and slowly colonise the whole celestial
-sphere. The sky is **one flat map** that you drag to pan, scroll or pinch to zoom, and that wraps around from
-24h back to 0h without a seam (Miller cylindrical projection, with a faint graticule and the ecliptic). Every
+sphere. The sky is **one flat map** that you drag to pan, scroll or pinch to zoom, and that **wraps in both
+directions**: leave at the right and you come back on the left, leave over the north celestial pole and you
+arrive from the south pole (Miller cylindrical projection, with a faint graticule and the ecliptic). Every
 star on the 88 constellation stick figures is a possible colony (757 of them, with their real positions,
 brightness and colour). The figure lines are your trade routes; short "hyperlanes" join neighbouring
 constellations. All 110 Messier objects are survey sites. It is a solo, PvE game with no decay: nothing is
@@ -22,8 +23,19 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   distance). Charters are paid up front and queue, so ships keep chaining outward even while you are away.
 - **Develop** colonies: *Industry* (more revenue), *Logistics* (faster ships, stronger routes, more fleet
   slots), *R&D* (produces **research points ◉**).
-- **Surveys**: what a star holds (habitable moon, mineral belt, gas giants, ancient ruins, a pulsar…) is
-  revealed when you colonise it, and tweaks its revenue, storage or research. It is fixed per star.
+- **Stars and their bonuses**: every star has a **spectral class** (O B A F G K M, estimated from its colour, with
+  the real types such as Sirius A1V for the 20 named stars) and a **brightness tier** from its magnitude, and each
+  gives the colony a fixed bonus. Hot blue B stars pay +25% revenue, white A stars add research, yellow G stars
+  (like the Sun) pay +20%, orange K and red M stars hold more, F stars launch ships faster, and stars brighter than
+  magnitude 3 are **beacons** (Beacon, Brilliant, Bright) with stronger trade routes and faster ships. The same
+  bonus for every star of that kind: no unique powers.
+- **Flagships**: the 20 named stars are sector offices. Every colony remits 25% of its revenue to the nearest
+  flagship you own; the flagship's vault holds 24 hours, **never banks itself**, and collecting there pays a 20%
+  dividend premium. Whatever else you automate, the important stars still need a visit, at every stage of the
+  game: the Corporation panel shows what share of your income waits for one.
+- **Auto-collection**: research the **Telegraph** (30%), **Electronic Funds Transfer** (+25%) and **Digital
+  Payments** (+25%) and ordinary colonies bank up to 80% of what they keep automatically, with a Clearing House
+  on top. Flagships are excluded, and so is one-tap constellation collection of their vaults.
 - **Trade routes** between neighbouring colonies boost both ends, more when their star colours differ.
 - **Technology**: a 22-project tree of real human technology, from the refracting telescope (1608) through
   electric power, rockets, computers, solar cells, space stations, the internet, reusable rockets, fusion and
@@ -43,8 +55,7 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
 - **Messier objects** need a colony nearby plus research points. Each type gives a bonus (globulars: fleet
   slots, open clusters: revenue, nebulae: research, galaxies: speed) and is stamped into the Messier catalogue
   with its photograph. Study one in depth to double its bonus.
-- **Routes and lanes**: upgrade any route between colonies (3 levels) for a bigger trade bonus and faster
-  ships, or build entirely new **lanes** between nearby stars (dotted green lines when a star is selected).
+- **Routes**: upgrade any route between colonies (3 levels) for a bigger trade bonus and faster ships.
 - **Comets and novae** cut routes for a while. Redraw the missing lines from memory for cash, a bonus for a
   perfect redraw and research points. Their clocks only run while the game is open.
 - **Developed constellations**: colonise every star and develop each to ≥3 levels. It is stamped in the Codex
@@ -56,7 +67,8 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
 - **Sky School** (gold button): five-question minigames that pay a little cash and research. *Constellations*:
   name a figure, pick the figure for a name, match a myth to a constellation, find a neighbour. *Stars*:
   which star is circled, what colour is it, which is brighter, which constellation is it in. *Messier*:
-  what kind of object is this picture, which picture is a globular cluster / nebula / galaxy…, which
+  what kind of object is this picture, **which Messier number or common name is this photo**, which photo is
+  M13 or the Orion Nebula (the wrong answers look more and more alike as you learn an object), which
   constellation holds M42, which number is the Crab Nebula. Rewards are deliberately modest (about 40 seconds
   of your revenue per correct answer, ×2 the first time you get something right, plus small streak and
   perfect-round bonuses). It runs on **spaced repetition**: an item is only *learned* after **10 correct
@@ -85,7 +97,7 @@ Keys are ignored while you type in a text box, and window keys toggle (press aga
 | `Esc` | Close the window, finish redrawing, deselect; with nothing to close it opens the menu |
 | `Space` | **Expand**: send a colony ship to the selected star, survey the selected Messier object (then study it in depth), or otherwise send a ship to the best-paying new star (next to the selected colony if one is selected). It never queues a charter on its own: with every ship out it asks you to pick a star |
 | `Shift` `Space` | Send a ship to the best new star for every idle ship |
-| `N` / `M` / `G` / `P` | Jump to the next new star to colonise / Messier object to survey / colony with full storage (fullest first) / petition. `Shift` goes backwards |
+| `N` / `M` / `G` / `P` | Jump to the next new star to colonise / Messier object to survey / flagship or colony with cash waiting (flagships first) / petition. `Shift` goes backwards |
 | `H` | Headquarters (while redrawing: show hints) |
 | `R` | Collect revenue at the selected colony (`Shift` `R`: the whole constellation once developed) |
 | `I` `L` `D` | Develop Industry, Logistics, R&D at the selected colony |
@@ -99,7 +111,7 @@ Keys are ignored while you type in a text box, and window keys toggle (press aga
 ## Pace
 
 Slowed down by about 2× since the first version, with quizzes nerfed. Roughly: a casual player visiting three
-times a day has colonised all 757 stars in about three weeks; once a day takes around eight. Researching the
+times a day has colonised all 757 stars in about three weeks; once a day takes around six. Researching the
 whole tree, filling the building slots, mastering all 88 constellations, surveying the Messier catalogue and
 learning every item in Sky School take considerably longer.
 
@@ -114,7 +126,7 @@ npm test             # engine tests: data integrity, economy, buildings, tech, e
 
 | File | Purpose |
 |---|---|
-| `js/corp.js` | Corporation data: buildings, technology tree, star survey traits, ranks, market conditions. |
+| `js/corp.js` | Corporation data: buildings, technology tree, spectral-class and brightness bonuses, ranks, market conditions. |
 | `js/engine.js` | Pure game logic (no DOM). Costs, rates, fleets, orders, buildings, tech, events, saves. |
 | `js/quiz.js` | Sky School logic (no DOM): question builders, scoring, rewards, spaced repetition. |
 | `js/quests.js` | Quests: story chain and repeatable contracts (progress derived from game state). |

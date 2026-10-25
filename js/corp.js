@@ -1,5 +1,5 @@
-/* Firmament corporation data: buildings built from human technology, the technology tree, star survey traits,
-   corporate ranks and market conditions. Pure data and tiny helpers, no state. */
+/* Firmament corporation data: buildings built from human technology, the technology tree, the bonuses of each spectral
+   class and brightness tier, corporate ranks and market conditions. Pure data and tiny helpers, no state. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.Corp = factory();
@@ -45,7 +45,7 @@
     },
     clearing: {
       name: 'Clearing House', short: 'CH', cat: 'regional', regional: true, tech: 'computing', costMul: 5, rp: 30,
-      blurb: 'Automated settlement: revenue banks itself instead of waiting to be collected.',
+      blurb: 'Automated settlement: revenue banks itself instead of waiting to be collected. Flagship stars always keep their own books.',
       text: L => 'Auto-banks ' + pct([0, 0.5, 0.7, 0.9][L]) + ' of revenue and research, ' + (L + 1) + ' hops',
     },
     shipyard: {
@@ -111,6 +111,7 @@
   const TECH_DEFS = [
     ['telescope', 'Refracting Telescope', '1608', 0, [], {}, 'Galileo points a spyglass at the sky and sees moons around Jupiter.', 0],
     ['stocks', 'Joint-Stock Company', '1602', 0, [], { out: 0.02 }, 'Shared ownership lets companies fund ventures too big for any one backer.', 1],
+    ['telegraph', 'Telegraph', '1844', 1, [], { auto: 0.3 }, 'Money travels as fast as news: ordinary colonies bank 30% of their cash automatically.', 1],
     ['electricity', 'Electric Power', '1882', 1, [], { out: 0.05 }, 'Power stations and grids light the first modern cities.', 1],
     ['radio', 'Radio', '1895', 1, ['electricity'], { res: 0.05 }, 'Signals through the air, and later from the stars.', 1],
     ['rocketry', 'Liquid-Fuel Rocket', '1926', 2, ['electricity'], {}, 'Goddard launches the first liquid-fuelled rocket.', 1],
@@ -118,10 +119,12 @@
     ['photovoltaics', 'Solar Cell', '1954', 2, ['electricity'], {}, 'Bell Labs turn sunlight directly into electricity.', 1],
     ['orbit', 'Orbital Flight', '1957', 2, ['rocketry'], {}, 'Sputnik 1 beeps from orbit and the space age begins.', 1.2],
     ['satellites', 'Communications Satellite', '1962', 2, ['orbit', 'radio'], { out: 0.04 }, 'Telstar relays live television across the Atlantic.', 1.2],
+    ['eft', 'Electronic Funds Transfer', '1973', 2, ['computing', 'telegraph'], { auto: 0.25 }, 'SWIFT and automated clearing move money between banks overnight: a further 25% is banked automatically.', 1.2],
     ['moon', 'Crewed Moon Landing', '1969', 2, ['orbit'], { speed: 0.05 }, 'Apollo 11 puts people on another world.', 1.4],
     ['station', 'Space Station', '1971', 2, ['orbit'], {}, 'Salyut 1 is the first crewed orbital outpost.', 1.4],
     ['space_telescope', 'Space Telescope', '1990', 3, ['station'], { res: 0.1 }, 'Hubble looks at the universe from above the atmosphere.', 1],
     ['internet', 'The Internet', '1991', 3, ['computing', 'satellites'], {}, 'A global network connects every lab and boardroom.', 1],
+    ['payments', 'Digital Payments', '2000s', 3, ['internet', 'eft'], { auto: 0.25 }, 'Payments settle in seconds, anywhere: 80% of ordinary revenue now banks itself.', 1],
     ['reusable', 'Reusable Rockets', '2015', 3, ['orbit'], { cost: 0.05 }, 'Boosters land themselves and fly again, and launches get cheap.', 1.2],
     ['asteroid', 'Asteroid Mining', '2020s', 3, ['reusable'], {}, 'Probes sample asteroids; prospectors eye their metals.', 1.3],
     ['ai', 'Machine Learning', '2010s', 3, ['internet'], { res: 0.15, out: 0.05 }, 'Software that learns from data speeds up every kind of research.', 1.3],
@@ -139,34 +142,53 @@
   const TECH_BY_ID = {}; TECHS.forEach(t => { TECH_BY_ID[t.id] = t; });
   const PERK_TEXT = {
     out: v => '+' + pct(v) + ' revenue', res: v => '+' + pct(v) + ' research', speed: v => '−' + pct(v) + ' ship travel time', cost: v => '−' + pct(v) + ' costs',
+    auto: v => '+' + pct(v) + ' of ordinary colonies’ cash banked automatically', cap: v => '+' + pct(v) + ' storage', ev: v => '+' + pct(v) + ' comet and nova rewards',
+    route: v => '+' + pct(v) + ' trade-route strength', star: v => '+' + pct(v) + ' star bonuses', slots: v => '+' + (Math.round(v * 100) / 100) + ' fleet slot' + (v === 1 ? '' : 's'),
   };
 
-  // ---------------------------------------------------------------- survey traits (revealed when a star is colonised)
-  const TRAITS = {
-    minerals: { name: 'Mineral-rich belt', rev: 0.2, text: '+20% revenue' },
-    habitable: { name: 'Habitable moon', rev: 0.35, text: '+35% revenue' },
-    gas: { name: 'Gas giants', rev: 0.12, cap: 0.25, text: '+12% revenue, +25% storage' },
-    ruins: { name: 'Ancient ruins', res: 0.015, text: '+54 RP/h' },
-    nebula: { name: 'Dust cloud', rev: 0.1, res: 0.01, text: '+10% revenue, +36 RP/h' },
-    pulsar: { name: 'Pulsar companion', rev: -0.1, res: 0.03, text: '−10% revenue, +108 RP/h' },
-    flare: { name: 'Flare star', rev: -0.1, res: 0.01, text: '−10% revenue, +36 RP/h' },
+  // ---------------------------------------------------------------- stars: spectral class and brightness
+  // Every star has a spectral class and a brightness tier, and each gives a fixed bonus to the colony: the same for every
+  // star of that kind. The class comes from the B-V colour index with the usual boundaries (an estimate: giants can be a
+  // class out), and the 20 named stars use their real types. Brighter than magnitude 3 earns a beacon bonus.
+  const SPECTRAL = {
+    O: { name: 'Blue', temp: 'over 30,000 K', blurb: 'Rare, enormous and short-lived.', rev: 0.35 },
+    B: { name: 'Blue-white', temp: '10,000 to 30,000 K', blurb: 'Hot and luminous, with neutral helium lines.', rev: 0.25 },
+    A: { name: 'White', temp: '7,500 to 10,000 K', blurb: 'The Balmer lines of hydrogen are strongest.', rev: 0.05, res: 0.02 },
+    F: { name: 'Yellow-white', temp: '6,000 to 7,500 K', blurb: 'Ionised calcium appears and hydrogen weakens.', rev: 0.05, speed: 0.1 },
+    G: { name: 'Yellow', temp: '5,200 to 6,000 K', blurb: 'Sun-like: the Sun is G2V.', rev: 0.2, res: 0.005 },
+    K: { name: 'Orange', temp: '3,700 to 5,200 K', blurb: 'Cooler and long-lived, with neutral metal lines.', cap: 0.2, res: 0.01 },
+    M: { name: 'Red', temp: '2,400 to 3,700 K', blurb: 'The commonest stars, with molecular bands such as TiO.', cap: 0.4 },
   };
-  const TRAIT_WEIGHTS = [ // by colour class: blue-white, yellow, orange-red
-    { pulsar: 2, ruins: 1, minerals: 1, gas: 1, nebula: 2 },
-    { habitable: 3, minerals: 2, gas: 2, ruins: 1, nebula: 1 },
-    { flare: 2, habitable: 2, minerals: 2, gas: 2, ruins: 1, nebula: 1 },
+  const SPECTRAL_ORDER = 'OBAFGKM';
+  const TIERS = [
+    { max: 1, name: 'Beacon', route: 0.3, speed: 0.15 },
+    { max: 2, name: 'Brilliant', route: 0.2, speed: 0.1 },
+    { max: 3, name: 'Bright', route: 0.1, speed: 0.05 },
   ];
-  function seeded(seed) { let s = (Math.imul(seed + 1, 2654435761) >>> 0) || 7; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
-  function genTraits(hip, cls) { // deterministic per star: 30% none, 50% one, 20% two
-    const r = seeded(hip * 31 + 7), roll = r(), n = roll < 0.3 ? 0 : roll < 0.8 ? 1 : 2;
-    const w = TRAIT_WEIGHTS[cls], ids = Object.keys(w), out = [];
-    for (let k = 0; k < n; k++) {
-      const pool = ids.filter(x => !out.includes(x));
-      let t = r() * pool.reduce((a, x) => a + w[x], 0), pick = pool[0];
-      for (const x of pool) { t -= w[x]; if (t <= 0) { pick = x; break; } }
-      out.push(pick);
-    }
+  const spectralLetter = bv => (bv < -0.3 ? 'O' : bv < 0 ? 'B' : bv < 0.3 ? 'A' : bv < 0.58 ? 'F' : bv < 0.81 ? 'G' : bv < 1.4 ? 'K' : 'M');
+  const NAMED_TYPES = {
+    Sirius: 'A1V', Canopus: 'A9II', Arcturus: 'K1.5III', Vega: 'A0Va', Capella: 'G8III', Rigel: 'B8Ia', Procyon: 'F5IV-V', Achernar: 'B6Vep',
+    Betelgeuse: 'M1-2Ia-Iab', Hadar: 'B1III', Altair: 'A7V', Acrux: 'B0.5IV', Aldebaran: 'K5III', Antares: 'M1.5Iab', Spica: 'B1III-IV',
+    Pollux: 'K0III', Fomalhaut: 'A3V', Deneb: 'A2Ia', Mimosa: 'B0.5III', Polaris: 'F7Ib',
+  };
+  function starProfile(star) { // star = [hip, ra, dec, mag, bv, constellation, name, named]
+    const mag = star[3], real = NAMED_TYPES[star[6]];
+    const letter = real ? real[0] : spectralLetter(star[4]);
+    const sp = SPECTRAL[letter], tier = TIERS.find(t => mag < t.max) || null;
+    return { letter, type: real || '', estimated: !real, spectral: sp, tier, mag, rev: sp.rev || 0, res: sp.res || 0, cap: sp.cap || 0, speed: (sp.speed || 0) + (tier ? tier.speed : 0), route: tier ? tier.route : 0 };
+  }
+  // the bonuses as readable lines; k scales them (the Academy's star-classification topic strengthens every star)
+  function classPerks(p, k) {
+    k = k || 1; const out = [];
+    if (p.spectral.rev) out.push('+' + pct(p.spectral.rev * k) + ' revenue');
+    if (p.spectral.res) out.push('+' + perHour(p.spectral.res * k));
+    if (p.spectral.cap) out.push('+' + pct(p.spectral.cap * k) + ' storage');
+    if (p.spectral.speed) out.push('ships leave ' + pct(p.spectral.speed * k) + ' faster');
     return out;
+  }
+  function tierPerks(p, k) {
+    k = k || 1;
+    return p.tier ? ['+' + pct(p.tier.route * k) + ' trade-route strength', 'ships leave ' + pct(p.tier.speed * k) + ' faster'] : [];
   }
 
   // ---------------------------------------------------------------- corporate rank (by number of colonies)
@@ -190,6 +212,6 @@
 
   return {
     BUILDINGS, BUILDING_ORDER, BUILDING_MAX, BUILD_LEVEL_MUL, BUILD_CATS, ERAS, TECHS, TECH_BY_ID, PERK_TEXT,
-    TRAITS, genTraits, RANKS, MARKETS, defaultCompanyName,
+    SPECTRAL, SPECTRAL_ORDER, TIERS, NAMED_TYPES, spectralLetter, starProfile, classPerks, tierPerks, RANKS, MARKETS, defaultCompanyName,
   };
 });

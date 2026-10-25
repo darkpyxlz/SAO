@@ -142,7 +142,7 @@
       h += '<button class="home" data-act="newgame" data-i="' + i + '"><b><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(name) + '</b> <span class="muted tiny">' + esc(SKY.consts[st[5]].name) + ' · mag ' + st[3].toFixed(2) + '</span><small>' + esc(txt) + '</small></button>';
     }
     h += '</div><p><label class="btn small">Import a save file<input type="file" accept=".json,application/json" id="imp-start" hidden></label></p>';
-    h += '<ul class="how"><li>Every colony earns <b class="gold">cash</b>, which waits in storage until you collect it.</li><li>Spend cash on colony ships to expand along constellation lines and hyperlanes.</li><li>Research technology (<b class="cyan">◉ research points</b>) to unlock real-world-inspired buildings: telescopes, launch pads, fusion plants, Dyson swarms.</li><li>Neighbouring colonies of different colours boost each other through trade routes.</li><li>Comets and novae cut routes. Redraw them from memory for a bonus.</li><li>Your progress saves in this browser. Menu → Export keeps a backup.</li><li class="k-only">On a keyboard? Space expands, C opens the codex, and ? lists every shortcut.</li></ul></div>';
+    h += '<ul class="how"><li>Every colony earns <b class="gold">cash</b>, which waits in storage until you collect it. Research the Telegraph and its successors to bank most of it automatically.</li><li>The 20 named stars are your <b class="gold">flagships</b>: nearby colonies remit royalties to them, and they never bank themselves, so you keep coming back.</li><li>Spend cash on colony ships to expand along constellation lines and hyperlanes. The map wraps in both directions.</li><li>Research technology (<b class="cyan">◉ research points</b>) to unlock real-world-inspired buildings: telescopes, launch pads, fusion plants, Dyson swarms.</li><li>Neighbouring colonies of different colours boost each other through trade routes. Every star’s spectral class and brightness give it a bonus.</li><li>Comets and novae cut routes. Redraw them from memory for a bonus.</li><li>Your progress saves in this browser. Menu → Export keeps a backup.</li><li class="k-only">On a keyboard? Space expands, C opens the codex, and ? lists every shortcut.</li></ul></div>';
     el.innerHTML = h;
     const imp = $('#imp-start');
     if (imp) imp.onchange = e => { if (e.target.files[0]) importFile(e.target.files[0], st => beginSession(st, false)); };
@@ -237,7 +237,7 @@
         up = cost === null ? '<span class="badge gold">max</span>' : '<button class="btn small" title="Stronger trade bonus and faster ships on this route" data-act="upgrade-route" data-e="' + e + '"' + (S.cash >= cost ? '' : ' disabled') + '>' + money(cost) + '</button>';
       }
       const pips = both ? ' <span class="pips" title="Route level">' + [0, 1, 2].map(k => '<i class="' + (k < rl ? 'on' : '') + '"></i>').join('') + '</span>' : '';
-      h += '<div class="row tiny"><span class="grow"><span class="dot" style="background:' + rgbOf(to) + '"></span><span class="link" data-act="sel-star" data-i="' + to + '">' + esc(SKY.stars[to][6]) + '</span> <span class="muted">' + G.edgeLen[e].toFixed(1) + '°' + (SKY.edges[e][2] === -2 ? ' built lane' : lane ? ' lane' : '') + '</span>' + pips + '</span>' + (cl ? '' : '<span class="muted">○</span>') + tag + up + '</div>';
+      h += '<div class="row tiny"><span class="grow"><span class="dot" style="background:' + rgbOf(to) + '"></span><span class="link" data-act="sel-star" data-i="' + to + '">' + esc(SKY.stars[to][6]) + '</span> <span class="muted">' + G.edgeLen[e].toFixed(1) + '°' + (lane ? ' hyperlane' : '') + '</span>' + pips + '</span>' + (cl ? '' : '<span class="muted">○</span>') + tag + up + '</div>';
     }
     return h;
   }
@@ -272,20 +272,34 @@
     if (locked) h += '<div class="muted tiny" style="margin-top:6px">' + locked + ' more building' + (locked === 1 ? '' : 's') + ' need technology: <span class="link" data-act="open-corp-tech">open the tech tree</span>.</div>';
     return h + '</div>';
   }
-  function laneSection(i) {
-    const lanes = G.buildableLanes(i);
-    if (!lanes.length) return '';
-    let h = '<div class="p-sec"><h4>Build new routes</h4><div class="muted tiny" style="margin-bottom:4px">Dotted green lines on the map. A new lane adds a trade route and a shortcut for ships.</div>';
-    for (const l of lanes) {
-      const cost = G.laneCost(l.e), chk = G.canBuildLane(l.e);
-      h += '<div class="row tiny"><span class="grow"><span class="dot" style="background:' + rgbOf(l.other) + '"></span><span class="link" data-act="sel-star" data-i="' + l.other + '">' + esc(SKY.stars[l.other][6]) + '</span> <span class="muted">' + l.deg.toFixed(1) + '°</span></span><button class="btn small" data-act="build-lane" data-e="' + l.e + '"' + (chk.ok ? '' : ' disabled') + '>' + money(cost) + '</button></div>';
-    }
+  // the star's spectral class and brightness, and what they give the colony
+  function starSection(i) {
+    const p = G.profileOf(i), k = G.d.starK, sp = p.spectral, cl = G.Corp.classPerks(p, k), tp = G.Corp.tierPerks(p, k);
+    let h = '<div class="p-sec"><h4>Star</h4>';
+    h += '<div class="row tiny"><b>Spectral class ' + p.letter + '</b><span class="muted">' + (p.type ? esc(p.type) : 'estimated from colour') + ' · ' + esc(sp.name.toLowerCase()) + ', ' + sp.temp + '</span></div>';
+    h += '<div class="tiny">' + (cl.length ? '<span class="good">' + esc(cl.join(' · ')) + '</span>' : '<span class="muted">No class bonus</span>') + ' <span class="muted">· ' + esc(sp.blurb) + '</span></div>';
+    h += '<div class="row tiny" style="margin-top:6px"><b>Magnitude ' + p.mag.toFixed(2) + '</b>' + (p.tier ? '<span class="badge gold">' + p.tier.name + '</span>' : '<span class="muted">fainter than 3: no brightness bonus</span>') + '</div>';
+    if (tp.length) h += '<div class="tiny good">' + esc(tp.join(' · ')) + '</div>';
+    if (k > 1.001) h += '<div class="tiny cyan" style="margin-top:4px">The Academy strengthens every star bonus ×' + k.toFixed(2) + '.</div>';
     return h + '</div>';
+  }
+  // a flagship is a named star: the sector office that nearby colonies remit royalties to
+  function flagshipSection(i) {
+    const S = G.state, D = G.d, cfg = G.CFG;
+    if (G.isFlagship(i)) {
+      const t = G.tributaries(i), roy = t.reduce((a, j) => a + D.rate[j] * cfg.royaltyShare, 0);
+      let h = '<div class="p-sec"><h4>★ Flagship</h4><div class="tiny">The sector office for <b>' + plural(t.length, 'colony', 'colonies') + '</b>. They remit ' + Math.round(cfg.royaltyShare * 100) + '% of their revenue here (' + rateText(roy) + '), the vault holds ' + cfg.flagshipCapH + ' hours and never banks itself, and collecting pays a ' + Math.round(cfg.flagshipPremium * 100) + '% dividend premium. Visit it every day.</div>';
+      if (t.length) h += '<div class="tiny muted" style="margin-top:4px">' + t.slice(0, 6).map(j => esc(SKY.stars[j][6])).join(', ') + (t.length > 6 ? ', …' : '') + '</div>';
+      return h + '</div>';
+    }
+    const f = G.sectorOf(i);
+    if (f >= 0) return '<div class="p-sec"><h4>Sector</h4><div class="tiny">' + Math.round(cfg.royaltyShare * 100) + '% of this colony’s revenue (' + rateText(D.rate[i] * cfg.royaltyShare) + ') is booked at the flagship <span class="link" data-act="sel-star" data-i="' + f + '">' + esc(SKY.stars[f][6]) + '</span>. Collect it there.</div></div>';
+    return '<div class="p-sec"><h4>Sector</h4><div class="tiny muted">No flagship of yours is in reach yet, so this colony keeps all its revenue. Colonise a named star to open a sector office.</div></div>';
   }
   function starPanel(i) {
     const S = G.state, D = G.d, st = SKY.stars[i], s = S.stars[i], con = SKY.consts[st[5]];
     let h = '<div class="p-head"><h3>' + esc(st[6]) + '</h3><button class="x" data-act="close-panel" aria-label="Close">✕</button></div>';
-    h += '<div class="p-sub"><span class="link" data-act="open-const" data-c="' + st[5] + '">' + esc(con.name) + '</span> · <span class="dot" style="background:' + rgbOf(i) + '"></span>' + CL[G.cls[i]] + ' · mag ' + st[3].toFixed(2) + (i === S.home ? ' · <span class="badge cyan">HQ</span>' : '') + '</div>';
+    h += '<div class="p-sub"><span class="link" data-act="open-const" data-c="' + st[5] + '">' + esc(con.name) + '</span> · <span class="dot" style="background:' + rgbOf(i) + '"></span>' + CL[G.cls[i]] + ' · mag ' + st[3].toFixed(2) + (G.isFlagship(i) ? ' · <span class="badge gold">★ flagship</span>' : '') + (i === S.home ? ' · <span class="badge cyan">HQ</span>' : '') + '</div>';
     if (!s) {
       const chk = G.canLaunchTo(i);
       const origins = G.frontierOrigins(i).map(o => ({ o, sec: G.travelSeconds(o.from, o.deg, false, o.e) })).sort((a, b) => a.sec - b.sec);
@@ -300,7 +314,8 @@
         if (!chk.ok) h += '<div class="muted tiny">' + esc(chk.msg) + '</div>';
         else if (flying) h += '<div class="muted tiny">All ' + D.slots + ' ships are out. The charter is paid now and sails when one is free.</div>';
       }
-      h += '<div class="muted tiny" style="margin-top:6px">Unsurveyed: you find out what is there once you colonise it.</div></div>';
+      h += '</div>' + starSection(i);
+      if (G.isFlagship(i)) h += '<div class="p-sec"><h4>★ Flagship</h4><div class="tiny">A named star. Once colonised it becomes a sector office: nearby colonies remit ' + Math.round(G.CFG.royaltyShare * 100) + '% of their revenue to it.</div></div>';
       h += '<div class="p-sec"><h4>Routes</h4>' + routeRows(i) + '</div>';
       return h;
     }
@@ -310,9 +325,10 @@
     h += '<div class="row"><button class="btn gold grow" data-act="collect" data-i="' + i + '">Collect revenue' + kb('R') + '</button></div>';
     h += '<div class="row tiny muted"><span class="grow">Revenue</span><span data-lv="rate"></span></div>';
     h += '<div class="muted tiny" data-lv="rbreak"></div>';
-    if (D.auto[i] > 0) h += '<div class="tiny cyan" style="margin-top:4px">⟳ ' + Math.round(D.auto[i] * 100) + '% of this colony’s revenue is banked automatically by a Clearing House.</div>';
+    if (D.auto[i] > 0) h += '<div class="tiny cyan" style="margin-top:4px">⟳ ' + Math.round(D.auto[i] * 100) + '% of what this colony keeps is banked automatically (Treasury technology and Clearing House).</div>';
+    if (G.isFlagship(i)) h += '<div class="tiny gold" style="margin-top:4px">★ A flagship never banks itself: collect here for the ' + Math.round(G.CFG.flagshipPremium * 100) + '% dividend premium.</div>';
     h += '</div>';
-    h += '<div class="p-sec"><h4>Survey</h4><div class="tiny">' + esc(G.surveyText(i)) + '</div></div>';
+    h += flagshipSection(i) + starSection(i);
     const pet = S.petitions.find(p => p.star === i);
     if (pet) h += '<div class="p-sec"><h4>Petition</h4><div class="row"><span class="grow">' + esc(petitionText(pet)) + '</span></div><div class="row tiny"><span class="gold">+' + money(pet.reward) + '</span><span class="cyan">+' + pet.research + ' ◉</span><span class="grow"></span><button class="btn small ghost" data-act="dismiss-pet" data-id="' + pet.id + '">Dismiss</button></div></div>';
     h += '<div class="p-sec"><h4>Development</h4>';
@@ -337,7 +353,6 @@
       h += '</div>';
     }
     h += '<div class="p-sec"><h4>Routes</h4>' + routeRows(i) + '</div>';
-    h += laneSection(i);
     return h;
   }
   function messierPanel(m) {
@@ -380,12 +395,12 @@
       const q = k => el.querySelector('[data-lv="' + k + '"]');
       if (q('bar')) q('bar').style.width = (cap > 0 ? Math.min(100, s.s / cap * 100) : 0) + '%';
       if (q('stock')) q('stock').textContent = money(s.s);
-      if (q('cap')) q('cap').textContent = '/ ' + money(cap) + ' · full in ' + (s.s >= cap ? 'now' : dur((cap - s.s) / Math.max(1e-9, D.rate[i] * (1 - D.auto[i]))));
+      if (q('cap')) q('cap').textContent = '/ ' + money(cap) + ' · full in ' + (s.s >= cap ? 'now' : dur((cap - s.s) / Math.max(1e-9, D.accr[i] * (1 - D.auto[i]))));
       if (q('res')) q('res').textContent = '◉ ' + fmt(s.i) + ' / ' + fmt(icap);
       if (q('rate')) q('rate').textContent = rateText(D.rate[i]);
       if (q('rbreak')) {
         const known = G.baseRate[i] * (1 + 0.5 * s.r) * D.routeMul[i] * D.globalOut, extra = known > 0 ? D.rate[i] / known : 1;
-        q('rbreak').textContent = 'base ' + rateText(G.baseRate[i]) + ' × industry ' + (1 + 0.5 * s.r).toFixed(1) + ' × routes ' + D.routeMul[i].toFixed(2) + ' × company ' + D.globalOut.toFixed(2) + ' × buildings & survey ' + extra.toFixed(2);
+        q('rbreak').textContent = 'base ' + rateText(G.baseRate[i]) + ' × industry ' + (1 + 0.5 * s.r).toFixed(1) + ' × routes ' + D.routeMul[i].toFixed(2) + ' × company ' + D.globalOut.toFixed(2) + ' × buildings & star ' + extra.toFixed(2);
       }
     }
   }
@@ -429,7 +444,9 @@
     const full = G.attention();
     const chips = [];
     if (S.events.length && !ui.redraw) chips.push('<span class="chip red" data-act="redraw-start" data-id="' + S.events[0].id + '">☄ routes cut' + kb('E') + '</span>');
-    if (full.length) chips.push('<span class="chip gold" data-act="goto-full">$ ' + full.length + ' colon' + (full.length === 1 ? 'y' : 'ies') + ' with full storage' + kb('G') + '</span>');
+    const flags = full.filter(a => a.why === 'flagship'), plain = full.filter(a => a.why === 'full');
+    if (flags.length) chips.push('<span class="chip gold" data-act="goto-full">★ ' + flags.length + ' flagship' + (flags.length === 1 ? '' : 's') + ' ready to collect' + kb('G') + '</span>');
+    if (plain.length) chips.push('<span class="chip gold" data-act="goto-full">$ ' + plain.length + ' colon' + (plain.length === 1 ? 'y' : 'ies') + ' with full storage' + (flags.length ? '' : kb('G')) + '</span>');
     if (S.petitions.length) chips.push('<span class="chip cyan" data-act="goto-petition">✉ ' + S.petitions.length + ' petition' + (S.petitions.length === 1 ? '' : 's') + kb('P') + '</span>');
     const idle = Math.max(0, D.slots - S.fleets.length);
     const canGo = idle > 0 && [...ui.frontier].some(t => G.canLaunchTo(t).ok);
@@ -656,7 +673,7 @@
       h += rk.next ? '<div class="bar"><i style="width:' + Math.min(100, (rk.count - G.RANKS[rk.idx].at) / (rk.next.at - G.RANKS[rk.idx].at) * 100) + '%"></i></div><div class="muted tiny">' + plural(rk.next.at - rk.count, 'more colony', 'more colonies') + ' to become a ' + esc(rk.next.title) + '</div>' : '<div class="muted tiny">The highest corporate rank. The whole sky is yours.</div>';
       h += '</div>';
       const ch = priceChange();
-      h += '<div class="stat-grid"><div class="stat"><b class="gold">' + money(D.totalRate * 3600) + '/h</b><span>revenue</span></div><div class="stat"><b class="cyan">' + fmt(D.totalRes * 3600) + ' RP/h</b><span>research</span></div><div class="stat"><b>' + money(G.valuation()) + '</b><span>valuation</span></div><div class="stat"><b>' + D.buildingCount + '</b><span>buildings</span></div><div class="stat"><b>' + (G.techCount() - 1) + ' / ' + (G.TECHS.length - 1) + '</b><span>technologies</span></div><div class="stat"><b>' + D.slots + '</b><span>fleet slots</span></div></div>';
+      h += '<div class="stat-grid"><div class="stat"><b class="gold">' + money(D.totalRate * 3600) + '/h</b><span>revenue</span></div><div class="stat"><b class="cyan">' + fmt(D.totalRes * 3600) + ' RP/h</b><span>research</span></div><div class="stat"><b>' + money(G.valuation()) + '</b><span>valuation</span></div><div class="stat"><b>' + D.buildingCount + '</b><span>buildings</span></div><div class="stat"><b>' + (G.techCount() - 1) + ' / ' + (G.TECHS.length - 1) + '</b><span>technologies</span></div><div class="stat"><b>' + D.slots + '</b><span>fleet slots</span></div><div class="stat"><b>' + Math.round(D.manualShare * 100) + '%</b><span>of your income waits for a visit</span></div><div class="stat"><b class="gold">' + G.FLAGS.filter(f => S.stars[f]).length + ' / ' + G.FLAGS.length + '</b><span>flagships</span></div></div>';
       h += '<div class="pricebox"><div class="row"><b>' + esc(ticker(S.corp.name)) + '</b><span style="font-size:20px;font-weight:600">$' + M.price.toFixed(2) + '</span><span class="' + (ch >= 0 ? 'good' : 'bad') + '">' + (ch >= 0 ? '▲' : '▼') + Math.abs(ch).toFixed(2) + '%</span><span class="grow"></span><span class="muted tiny">all-time high $' + M.hi.toFixed(2) + '</span></div><canvas class="spark" id="spark"></canvas><div class="muted tiny">The share price follows the company’s worth (cash, revenue and colonies) with market noise.</div></div>';
       if (M.kind) { const m = G.MARKETS[M.kind]; h += '<div class="callout"><b>◈ ' + esc(m.name) + '</b> · ' + esc(m.text) + ' · ' + dur(M.remaining) + ' left. <span class="muted">(Market clocks only run while you play.)</span></div>'; }
       else h += '<div class="muted tiny" style="margin-bottom:8px">Markets are calm right now. Booms, bubbles, crunches and contracts come and go while you play.</div>';
@@ -695,7 +712,7 @@
     buildings(body) {
       const S = G.state, all = G.allBuildings();
       let h = '<p class="muted" style="margin-top:0;max-width:720px">Buildings are built at your colonies, in building slots (one per three development levels, shown as rings around the star). Select a colony on the map to build. Technology unlocks each building.</p>';
-      h += '<div class="stat-grid"><div class="stat"><b>' + all.length + '</b><span>buildings standing</span></div><div class="stat"><b>' + new Set(all.map(b => b.id)).size + ' / ' + Object.keys(G.BUILDINGS).length + '</b><span>kinds built</span></div><div class="stat"><b class="gold">' + money(S.stats.auto || 0) + '</b><span>banked automatically</span></div><div class="stat"><b>' + S.stats.lanes + ' / ' + S.stats.routeUps + '</b><span>lanes built / route upgrades</span></div></div>';
+      h += '<div class="stat-grid"><div class="stat"><b>' + all.length + '</b><span>buildings standing</span></div><div class="stat"><b>' + new Set(all.map(b => b.id)).size + ' / ' + Object.keys(G.BUILDINGS).length + '</b><span>kinds built</span></div><div class="stat"><b class="gold">' + money(S.stats.auto || 0) + '</b><span>banked automatically</span></div><div class="stat"><b>' + S.stats.routeUps + '</b><span>route upgrades</span></div></div>';
       for (const catId of Object.keys(G.Corp.BUILD_CATS)) {
         const cat = G.Corp.BUILD_CATS[catId];
         h += '<h3 style="color:' + cat.color + '">' + cat.name + '</h3><div class="table-wrap"><table class="t"><tr><th>Building</th><th>Effect (level 1 → 3)</th><th>Technology</th><th>Built</th></tr>';
@@ -847,9 +864,10 @@
     guide(body) {
       body.innerHTML = '<div class="how" style="max-width:740px"><h3 style="margin-top:0">Goal</h3><p>You run a space corporation. Colonise every star on the constellation stick figures, develop every constellation, survey all 110 Messier objects and research every technology. The map is one flat sky that wraps left to right: drag to pan, scroll or pinch to zoom.</p>' +
         '<h3>Core loop</h3><ul><li><b class="gold">Cash</b> is earned by every colony. It piles up in that colony’s storage: <b>tap the colony and Collect revenue</b> (storage stops filling when full, so visit often; orange-red stars hold the most).</li>' +
-        '<li><b>Colonise</b> a new star: select an uncolonised star next to your territory (ringed in blue) and send a colony ship. Charters are paid up front and sail as soon as a ship is free, even while you are away. Each star has a hidden <b>survey</b> (habitable moons, mineral belts, ancient ruins…) revealed when you arrive.</li>' +
+        '<li><b>Colonise</b> a new star: select an uncolonised star next to your territory (ringed in blue) and send a colony ship. Charters are paid up front and sail as soon as a ship is free, even while you are away. Every star has a <b>spectral class</b> (O B A F G K M, from its colour) and a <b>brightness</b>, and each gives the colony a bonus: hot blue stars pay more, white ones research, orange and red ones store more, and the brightest ones are beacons for routes and ships.</li>' +
         '<li><b>Develop</b> colonies with Industry (more revenue), Logistics (faster ships, stronger routes, more fleet slots) and R&amp;D (research points ◉).</li>' +
-        '<li><b>Trade routes</b>: neighbouring colonies boost each other, more when their star colours differ. Upgrade routes, or build brand-new lanes (dotted green lines when a star is selected).</li></ul>' +
+        '<li><b>Trade routes</b>: neighbouring colonies boost each other, more when their star colours differ. Upgrade routes for stronger bonuses and faster ships. The map wraps in both directions: leave over the north pole and you arrive from the south.</li>' +
+        '<li><b>Flagships</b>: the 20 named stars are sector offices. Colonies around one remit 25% of their revenue to it, its vault holds a day, it <b>never banks itself</b> and collecting there pays a dividend premium. Research the <b>Telegraph</b>, <b>Electronic Funds Transfer</b> and <b>Digital Payments</b> and ordinary colonies bank up to 80% of their cash automatically; the flagships still need you, at every stage of the game.</li></ul>' +
         '<h3>Technology and buildings</h3><p>Open <b>Corporation → Technology</b> to research human technology in real time: the telescope, rockets, computers, solar cells, space stations, fusion, space elevators, Dyson swarms and warp drives. Technology unlocks <b>buildings</b> and gives company-wide bonuses. Every three development levels on a colony open a building slot (the rings around the star; each building shows as a little satellite). Revenue buildings such as Solar Farms and Fusion Plants cost what they earn back in a day or two; a <b>Clearing House</b> banks the revenue of a whole region automatically; a <b>Space Station</b> adds slots.</p>' +
         '<h3>The company</h3><p>As you grow you are promoted from Startup to Cosmic Monopoly. Your share price follows the company’s worth, and random <b>market conditions</b> (booms, tech bubbles, credit crunches, government contracts) come and go while you play.</p>' +
         '<h3>Messier objects</h3><p>Send a <b>survey mission</b> to a Messier object near one of your colonies. Each type gives a bonus (globulars: fleet slots, open clusters: revenue, nebulae: research, galaxies: speed) and is stamped into the catalogue with its photograph.</p>' +
@@ -888,7 +906,6 @@
     'build': el => { const r = G.build(+el.dataset.i, el.dataset.id); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'demolish': el => { const def = G.BUILDINGS[el.dataset.id]; if (confirm('Demolish the ' + def.name + '? You get half of what you paid back.')) { const r = G.demolish(+el.dataset.i, el.dataset.id); toast(r.msg, r.ok ? 'good' : 'bad'); } },
     'upgrade-route': el => { const r = G.upgradeRoute(+el.dataset.e); toast(r.msg, r.ok ? 'good' : 'bad'); },
-    'build-lane': el => { const r = G.buildLane(+el.dataset.e); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'quest-claim': el => { const r = QU.claim(el.dataset.id); toast(r.ok ? 'Quest reward: +' + money(r.reward.cash) + '  +' + rp(r.reward.research) : r.msg, r.ok ? 'gold' : 'bad'); },
     'quest-reroll': el => { QU.rerollContract(el.dataset.id); },
     'quest-claim-all': () => {
@@ -913,8 +930,8 @@
     'goto-const': el => { closeModal(); sky.goConst(+el.dataset.c); },
     'open-const': el => openConst(+el.dataset.c),
     'goto-full': () => gotoAttention('full'), 'goto-petition': () => gotoAttention('petition'), 'goto-frontier': () => gotoAttention('frontier'),
-    'collect': el => { const r = G.collect(+el.dataset.i); if (r.ok) toast('+' + money(r.gain) + (r.res >= 0.1 ? '  +' + rp(r.res) : ''), 'gold'); else toast(r.msg, 'bad'); },
-    'collect-const': el => { const r = G.collectConstellation(+el.dataset.c); toast('Collected ' + money(r.gain) + (r.res >= 0.1 ? ' and ' + rp(r.res) : ''), 'gold'); },
+    'collect': el => { const r = G.collect(+el.dataset.i); if (r.ok) toast((r.flagship ? '★ ' : '') + '+' + money(r.gain) + (r.res >= 0.1 ? '  +' + rp(r.res) : '') + (r.flagship ? '  (dividend premium +' + money(r.bonus) + ')' : ''), 'gold'); else toast(r.msg, 'bad'); },
+    'collect-const': el => { const r = G.collectConstellation(+el.dataset.c); toast('Collected ' + money(r.gain) + (r.res >= 0.1 ? ' and ' + rp(r.res) : '') + (r.kept ? '. The flagship keeps its own books: visit it to collect there.' : ''), 'gold'); },
     'upgrade': el => { const r = G.upgrade(+el.dataset.i, el.dataset.t); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'launch': el => { const r = G.launch(+el.dataset.i); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'cancel-order': el => { const r = G.cancelOrder(+el.dataset.id); toast(r.msg, r.ok ? 'good' : 'bad'); },
@@ -969,7 +986,7 @@
       [['Shift', 'Space'], 'Send a ship to the best new star for every idle ship'],
       [['N'], 'Next new star to colonise (Shift+N: previous)'],
       [['M'], 'Next Messier object in reach to survey (Shift+M: previous)'],
-      [['G'], 'Next colony with full storage, fullest first (Shift+G: previous)'],
+      [['G'], 'Next flagship or colony with cash waiting, the most first (Shift+G: previous)'],
       [['P'], 'Next petition'],
       [['H'], 'Go to headquarters (while redrawing: show hints)'],
     ]],

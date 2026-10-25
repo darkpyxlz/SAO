@@ -20,7 +20,7 @@
     const messierKinds = () => new Set(Object.keys(G.state.messier).map(m => SKY.messier[m].kind)).size;
     const count = o => Object.keys(o).length;
     const learnedAll = () => learnedCount('const') + learnedCount('star') + learnedCount('messier');
-    const colonisedWith = trait => SKY.stars.reduce((n, s, i) => n + (G.state.stars[i] && G.traitsOf(i).includes(trait) ? 1 : 0), 0);
+    const colonisedClass = letter => SKY.stars.reduce((n, s, i) => n + (G.state.stars[i] && G.profileOf(i).letter === letter ? 1 : 0), 0);
 
     // [id, chapter, title, description, current(), target, reward minutes of income]
     const STORY = [];
@@ -35,8 +35,8 @@
     // the company
     [[2, 15], [3, 40], [4, 120], [5, 300], [6, 800]].forEach(([n, m]) => add('rank' + n, 'Corporation', 'Become a ' + G.RANKS[n].title, 'Reach ' + G.RANKS[n].at + ' colonies and be promoted to ' + G.RANKS[n].title + '.', () => G.rankInfo().idx, n, m));
     add('market3', 'Corporation', 'Ride the market', 'Live through 3 market conditions (booms, bubbles, crunches...) while you are playing.', () => st().marketEvents, 3, 20);
-    add('hab5', 'Corporation', 'Prime real estate', 'Colonise 5 stars whose survey found a Habitable moon.', () => colonisedWith('habitable'), 5, 30);
-    add('ruins3', 'Corporation', 'Dig site', 'Colonise 3 stars whose survey found Ancient ruins.', () => colonisedWith('ruins'), 3, 30);
+    add('classG', 'Corporation', 'A star like ours', 'Colonise 5 yellow G-class stars. The Sun is G2V.', () => colonisedClass('G'), 5, 30);
+    add('classM', 'Corporation', 'Red giants and dwarfs', 'Colonise 10 red M-class stars: the commonest in the galaxy, and big on storage.', () => colonisedClass('M'), 10, 40);
     // technology
     add('tech1', 'Technology', 'First breakthrough', 'Complete your first research project (Corporation → Technology).', () => G.techCount() - 1, 1, 8);
     add('tech8', 'Technology', 'Eight breakthroughs', 'Complete 8 research projects.', () => G.techCount() - 1, 8, 40);
@@ -53,9 +53,7 @@
     add('dyson1', 'Buildings', 'Wrap a star', 'Build a Dyson Swarm.', () => blds().filter(b => b.id === 'dyson').length, 1, 400);
     // routes
     add('route5', 'Routes', 'Better roads', 'Upgrade trade routes 5 times.', () => st().routeUps, 5, 10);
-    add('lane3', 'Routes', 'Pioneer lanes', 'Build 3 new trade lanes between stars.', () => st().lanes, 3, 15);
     add('route30', 'Routes', 'Highways of light', 'Upgrade trade routes 30 times.', () => st().routeUps, 30, 80);
-    add('lane20', 'Routes', 'A web of lanes', 'Build 20 new trade lanes.', () => st().lanes, 20, 120);
     [[1, 6], [5, 20], [15, 50], [40, 120], [110, 600]].forEach(([n, m]) => add('mes' + n, 'Messier', n === 110 ? 'The Messier Marathon' : n === 1 ? 'First deep-sky object' : 'Catalogue ' + n + ' Messier objects', 'Send survey missions to Messier objects and catalogue them.', () => count(G.state.messier), n, m));
     add('meskinds', 'Messier', 'A little of everything', 'Catalogue a globular cluster, an open cluster, a nebula and a galaxy.', messierKinds, 4, 30);
     [[1, 6], [5, 25], [15, 80]].forEach(([n, m]) => add('event' + n, 'Skies', n === 1 ? 'Mend the sky' : 'Resolve ' + n + ' comets and novae', 'Redraw the trade routes cut by a comet or nova.', () => st().eventsDone, n, m));
@@ -83,7 +81,6 @@
       { key: 'messier', title: n => 'Survey ' + (n > 1 ? n + ' Messier objects' : 'a Messier object'), counter: () => count(G.state.messier), size: sc => 1, mins: 8 },
       { key: 'build', title: n => 'Construct or upgrade ' + n + ' building' + (n > 1 ? 's' : ''), counter: () => st().built + st().buildUps, size: sc => 1 + Math.floor(sc * 1.5), mins: 3 },
       { key: 'tech', title: n => 'Complete a research project', counter: () => st().techs, size: sc => 1, mins: 5 },
-      { key: 'lane', title: n => 'Build ' + (n > 1 ? n + ' new trade lanes' : 'a new trade lane'), counter: () => st().lanes, size: sc => 1 + Math.floor(sc * 2), mins: 3 },
     ];
     const Q = () => { const q = G.state.quests; if (!q.claimed) q.claimed = {}; if (!q.contracts) q.contracts = []; return q; };
     const scale = () => Math.min(3, G.d.count / 40);

@@ -1,12 +1,14 @@
-/* Firmament sky renderer: a flat, horizontally wrapping star map (Miller cylindrical projection)
-   with pan, zoom and picking, plus the small constellation charts used in the codex. */
+/* Firmament sky renderer: a flat star map (Miller cylindrical projection) that wraps both ways, like a torus: leave
+   at the right and you come back on the left, leave over the north pole and you arrive from the south pole.
+   Pan, zoom and picking, plus the small constellation charts used in the codex. */
 (function () {
   'use strict';
   const RAD = Math.PI / 180;
   const PI = Math.PI, TAU = Math.PI * 2;
   const wrap = d => d - TAU * Math.floor((d + PI) / TAU); // -> [-PI, PI)
   const millerY = decDeg => 1.25 * Math.log(Math.tan(PI / 4 + 0.4 * decDeg * RAD));
-  const YMAX = millerY(90);
+  const YMAX = millerY(90), YP = 2 * YMAX; // the map is YP tall; its top edge (north pole) joins its bottom edge (south pole)
+  const wrapY = d => d - YP * Math.floor((d + YP / 2) / YP); // -> [-YP/2, YP/2)
   const OBLIQUITY = 23.4393 * RAD;
 
   // approximate star colour from B-V
@@ -54,7 +56,7 @@
     let scale = 300;
 
     const baseScale = () => (Math.min(W, H) / 2) / 1.155;
-    const minScale = () => Math.max(W / TAU, H / (2 * YMAX + 0.3));
+    const minScale = () => Math.max(W / TAU, H / YP); // never show more than one copy of the sky in either direction
     function resize() {
       dpr = Math.min(2, window.devicePixelRatio || 1);
       W = canvas.clientWidth; H = canvas.clientHeight;
@@ -66,7 +68,7 @@
       if (!W) return;
       const b = baseScale();
       v.zoom = Math.max(minScale() / b, Math.min(45, v.zoom));
-      v.y0 = Math.max(-YMAX, Math.min(YMAX, v.y0));
+      v.y0 = wrapY(v.y0);
       v.x0 = ((v.x0 % TAU) + TAU) % TAU;
     }
     function updateCam() { scale = v.zoom * baseScale(); }
@@ -85,6 +87,7 @@
       const dx = focused ? (cx - focus.x * W) / sc : 0, dy = focused ? (cy - focus.y * H) / sc : 0; // keep the target clear of the panel
       anim = { t0: performance.now(), ms: ms || 700, from: { x0: v.x0, y0: v.y0, zoom: v.zoom }, to: { x0: ra * RAD - dx, y0: millerY(dec) - dy, zoom: z } };
       anim.to.x0 = anim.from.x0 + wrap(anim.to.x0 - anim.from.x0);
+      anim.to.y0 = anim.from.y0 + wrapY(anim.to.y0 - anim.from.y0); // the short way round, over the pole if need be
     }
     function stepAnim() {
       if (!anim) return;
@@ -148,13 +151,13 @@
 
     // ---- drawing helpers
     const px = r => cx - wrap(r - v.x0) * scale;
-    const py = Y => cy - (Y - v.y0) * scale;
-    function lineBetween(a, b) { // route a->b, drawn on both sides of the seam when it crosses it
-      const d = wrap(sra[b] - sra[a]) * scale;
-      const xa = sx[a], ya = sy[a], xb = xa - d, yb = sy[b];
+    const py = Y => cy - wrapY(Y - v.y0) * scale;
+    function lineBetween(a, b) { // route a->b the short way round the torus, drawn on both sides of a seam when it crosses one
+      const dx = wrap(sra[b] - sra[a]) * scale, dy = wrapY(sY[b] - sY[a]) * scale;
+      const xa = sx[a], ya = sy[a], xb = xa - dx, yb = ya - dy;
       const onscreen = (x1, y1, x2, y2) => !(Math.max(x1, x2) < -10 || Math.min(x1, x2) > W + 10 || Math.max(y1, y2) < -10 || Math.min(y1, y2) > H + 10);
       if (onscreen(xa, ya, xb, yb)) { ctx.moveTo(xa, ya); ctx.lineTo(xb, yb); }
-      if (Math.abs(xb - sx[b]) > 1) { const xa2 = sx[b] + d; if (onscreen(xa2, ya, sx[b], yb)) { ctx.moveTo(xa2, ya); ctx.lineTo(sx[b], yb); } }
+      if (Math.abs(xb - sx[b]) > 1 || Math.abs(yb - sy[b]) > 1) { const xa2 = sx[b] + dx, ya2 = sy[b] + dy; if (onscreen(xa2, ya2, sx[b], sy[b])) { ctx.moveTo(xa2, ya2); ctx.lineTo(sx[b], sy[b]); } }
     }
     function drawMessierGlyph(x, y, kind, r, visited, hot) {
       ctx.lineWidth = 1.2;
@@ -167,6 +170,12 @@
       else if (kind === 'galaxy') { ctx.ellipse(x, y, r * 1.35, r * 0.62, -0.5, 0, TAU); ctx.fill(); ctx.stroke(); }
       else { ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); ctx.stroke(); }
       if (hot) { ctx.beginPath(); ctx.arc(x, y, r + 4, 0, TAU); ctx.strokeStyle = 'rgba(127,227,255,.5)'; ctx.stroke(); }
+    }
+    function sparkle(x, y, q, col) { // a small four-pointed star: the mark of a flagship
+      ctx.fillStyle = col; ctx.beginPath();
+      const k = q * 0.32;
+      ctx.moveTo(x, y - q); ctx.lineTo(x + k, y - k); ctx.lineTo(x + q, y); ctx.lineTo(x + k, y + k); ctx.lineTo(x, y + q); ctx.lineTo(x - k, y + k); ctx.lineTo(x - q, y); ctx.lineTo(x - k, y - k);
+      ctx.closePath(); ctx.fill();
     }
     function text(s, x, y, size, col, align, weight) {
       ctx.font = (weight || '') + ' ' + size + 'px system-ui, sans-serif';
@@ -210,9 +219,15 @@
         ctx.stroke();
       }
       ctx.setLineDash([]);
-      // map edges at the celestial poles
-      ctx.strokeStyle = 'rgba(120,150,230,.3)';
-      for (const Y of [-YMAX, YMAX]) { const y = py(Y); if (y > -2 && y < H + 2) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } }
+      // the seam where the north pole meets the south pole
+      const ys = py(YMAX);
+      if (ys > -2 && ys < H + 2) {
+        ctx.strokeStyle = 'rgba(120,150,230,.3)'; ctx.setLineDash([8, 6]);
+        ctx.beginPath(); ctx.moveTo(0, ys); ctx.lineTo(W, ys); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(150,170,230,.5)';
+        if (ys > 12) ctx.fillText('north celestial pole ↑', 4, ys - 4);
+        if (ys < H - 12) ctx.fillText('south celestial pole ↓', 4, ys + 12);
+      }
     }
 
     function render(t, ui) {
@@ -222,17 +237,12 @@
       const S = G.state, D = G.d;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = '#04060d'; ctx.fillRect(0, 0, W, H);
-      // area beyond the poles
-      ctx.fillStyle = '#020309';
-      const yt = py(YMAX), yb = py(-YMAX);
-      if (yt > 0) ctx.fillRect(0, 0, W, yt);
-      if (yb < H) ctx.fillRect(0, yb, W, H - yb);
       graticule();
 
       // field stars
       const fz = Math.min(1.8, 0.8 + v.zoom * 0.18);
       for (let i = 0; i < NF; i++) {
-        const y = cy - (fY[i] - v.y0) * scale;
+        const y = cy - wrapY(fY[i] - v.y0) * scale;
         if (y < -4 || y > H + 4) continue;
         const x = cx - wrap(fra[i] - v.x0) * scale;
         if (x < -4 || x > W + 4) continue;
@@ -271,18 +281,14 @@
       ctx.lineCap = 'round';
       for (let pass = 0; pass < 2; pass++) {
         for (let i = 0; i < E.length; i++) {
-          if (!G.edgeActive(i)) continue; // buildable lanes only show once built
-          const a = E[i][0], b = E[i][1], built = E[i][2] === -2, lane = E[i][2] < 0;
+          const a = E[i][0], b = E[i][1], lane = E[i][2] < 0;
           const ca = !!S.stars[a], cb = !!S.stars[b];
           const both = ca && cb;
           if (evEdges.has(i)) continue; // cut routes vanish (see hints below)
           if ((pass === 0) === both) continue; // faint edges first, then active ones
           const rl = S.routeLvl[i] || 0;
           ctx.beginPath(); lineBetween(a, b);
-          if (built) {
-            ctx.setLineDash([7, 3]);
-            ctx.strokeStyle = 'rgba(126,226,168,' + (0.55 + 0.12 * rl).toFixed(2) + ')'; ctx.lineWidth = 1.5 + rl * 0.9;
-          } else if (lane) {
+          if (lane) {
             ctx.setLineDash(rl ? [] : [2, 5]);
             ctx.strokeStyle = both ? (rl ? 'rgba(255,225,160,.6)' : 'rgba(143,180,255,.38)') : (ca || cb) ? 'rgba(143,180,255,.14)' : 'rgba(143,180,255,.05)';
             ctx.lineWidth = both ? 1 + rl * 0.9 : 1;
@@ -304,11 +310,13 @@
           ctx.setLineDash([]);
         }
       }
-      // buildable lanes from the selected star, and the reach of a selected regional building
+      // the reach of a selected regional building
       if (ui.sel && ui.sel.type === 'star' && S.stars[ui.sel.i]) {
         const si = ui.sel.i;
-        ctx.setLineDash([3, 5]); ctx.strokeStyle = 'rgba(126,226,168,.5)'; ctx.lineWidth = 1.3;
-        for (const bl of G.buildableLanes(si)) { ctx.beginPath(); lineBetween(si, bl.other); ctx.stroke(); }
+        // a flagship's sector: the colonies that remit royalties to it (or, for an ordinary colony, the flagship it remits to)
+        ctx.setLineDash([2, 5]); ctx.strokeStyle = 'rgba(255,217,138,.4)'; ctx.lineWidth = 1.2;
+        if (G.isFlagship(si)) { for (const j of G.tributaries(si)) { ctx.beginPath(); lineBetween(si, j); ctx.stroke(); } }
+        else { const f = G.sectorOf(si); if (f >= 0) { ctx.beginPath(); lineBetween(si, f); ctx.stroke(); } }
         ctx.setLineDash([]);
         const regional = G.buildingsAt(si).find(b => G.BUILDINGS[b.id].regional);
         if (regional && D.coverage[si]) {
@@ -381,12 +389,13 @@
             for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; ctx[k ? 'lineTo' : 'moveTo'](x + Math.cos(a) * hr, y + Math.sin(a) * hr); }
             ctx.closePath(); ctx.stroke();
           }
-          const cap = G.stockCap(i);
-          if (cap > 0 && s.s >= cap * 0.9) {
+          const cap = G.stockCap(i), flag = G.isFlagship(i);
+          const ready = flag ? D.accr[i] > 0 && s.s >= G.CFG.flagshipReadyH * 3600 * D.accr[i] : cap > 0 && s.s >= cap * 0.9;
+          if (ready) { // storage is full (or a flagship's vault is worth a visit): a pulsing ring calls you back
             const pulse = 0.5 + 0.5 * Math.sin(t / 380 + i);
-            ctx.strokeStyle = 'rgba(255,217,138,' + (0.5 + 0.4 * pulse).toFixed(2) + ')'; ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(255,217,138,' + (0.5 + 0.4 * pulse).toFixed(2) + ')'; ctx.lineWidth = flag ? 2.6 : 2;
             ctx.beginPath(); ctx.arc(x, y, r + 12 + rings * 2.6 + pulse * 2, 0, TAU); ctx.stroke();
-          } else if (s.s + s.i > 0 && cap > 0 && s.s >= cap * 0.35) {
+          } else if (!flag && s.s + s.i > 0 && cap > 0 && s.s >= cap * 0.35) {
             ctx.fillStyle = 'rgba(255,217,138,.9)'; ctx.beginPath(); ctx.arc(x + r + 3, y - r - 3, 2, 0, TAU); ctx.fill();
           }
         } else if (front.has(i)) {
@@ -401,6 +410,7 @@
         }
         if (ui.redraw && ui.redraw.from === i) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 5, 0, TAU); ctx.stroke(); }
         if (ui.sel && ui.sel.type === 'star' && ui.sel.i === i) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(x, y, r + 9, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
+        if (G.isFlagship(i)) sparkle(x - r - 6, y - r - 6, claimed ? 5 : 4, claimed ? 'rgba(255,217,138,.95)' : 'rgba(255,217,138,.5)');
         // labels: proper names for the important stars, official designations when zoomed in
         const showLabel = st[7] ? v.zoom > 0.85 : claimed ? v.zoom > 2.4 : v.zoom > 5;
         if (showLabel) text(st[6], x + r + 4, y + 4, st[7] ? 12 : 10.5, claimed || st[7] ? 'rgba(235,240,255,.92)' : 'rgba(170,185,230,.55)', 'left', st[7] ? '500' : '');
@@ -410,8 +420,8 @@
       for (const f of S.fleets) {
         const ra1 = sra[f.from], Y1 = sY[f.from];
         const toRa = f.kind === 's' ? sra[f.to] : mra[f.to], toY = f.kind === 's' ? sY[f.to] : mY[f.to];
-        const dR = wrap(toRa - ra1), frac = Math.max(0, Math.min(1, 1 - f.remaining / f.dur));
-        const pos = k => ({ x: px(ra1) - dR * k * scale, y: py(Y1 + (toY - Y1) * k) });
+        const dR = wrap(toRa - ra1), dY = wrapY(toY - Y1), frac = Math.max(0, Math.min(1, 1 - f.remaining / f.dur));
+        const pos = k => ({ x: px(ra1) - dR * k * scale, y: py(Y1 + dY * k) });
         const p = pos(frac), q = pos(Math.max(0, frac - 0.03)), e = pos(1);
         ctx.strokeStyle = 'rgba(255,217,138,.5)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(p.x, p.y); ctx.stroke();
         ctx.fillStyle = f.kind === 'm' ? '#7fe3ff' : '#ffd98a'; ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, TAU); ctx.fill();
@@ -446,6 +456,7 @@
         const f = fitTo(ids.map(i => sra[i]), ids.map(i => sY[i]));
         anim = { t0: performance.now(), ms: 700, from: { x0: v.x0, y0: v.y0, zoom: v.zoom }, to: { x0: f.ra * RAD, y0: f.y, zoom: f.zoom } };
         anim.to.x0 = anim.from.x0 + wrap(anim.to.x0 - anim.from.x0);
+        anim.to.y0 = anim.from.y0 + wrapY(anim.to.y0 - anim.from.y0);
       },
       goMessier(i) { const m = SKY.messier[i]; goTo(m.ra, m.dec, Math.max(v.zoom, 3.2), 0, true); },
       setFocus(x, y) { focus.x = x; focus.y = y; },

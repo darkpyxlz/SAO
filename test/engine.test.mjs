@@ -174,7 +174,7 @@ test('old v1 saves migrate (wonder fields are dropped)', () => {
 
 test('no unique powers: only Messier objects change global modifiers', () => {
   const G = mk('Sirius');
-  assert.deepEqual(G.d.P, { out: 0, speed: 0, slots: 0, res: 0, cost: 0, cap: 0, ev: 0 });
+  assert.deepEqual(G.d.P, { out: 0, speed: 0, slots: 0, res: 0, cost: 0, cap: 0, ev: 0, auto: 0, route: 0, star: 0 });
   for (const n of ['Aldebaran', 'Antares', 'Fomalhaut', 'Spica']) G.state.stars[G.nameIdx.get(n)] = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0 };
   G.recalc();
   assert.equal(G.d.P.out, 0, 'no Royal Stars bonus');
@@ -339,8 +339,8 @@ test('buildings: need the technology and a free slot (one per three development 
   assert.equal(G.slotsAt(home), 2);
   const rate0 = G.d.rate[home], cost = G.buildingCost(home, 'solar');
   assert.ok(G.build(home, 'solar').ok);
-  const tr = G.traitRev[home];
-  assert.ok(Math.abs(G.d.rate[home] / rate0 - (1.25 + tr) / (1 + tr)) < 0.01, 'a solar farm adds 25% revenue (before survey traits)');
+  const tr = G.profileOf(home).rev * G.d.starK;
+  assert.ok(Math.abs(G.d.rate[home] / rate0 - (1.25 + tr) / (1 + tr)) < 0.01, 'a solar farm adds 25% revenue (on top of the star bonus)');
   assert.ok(G.state.cash <= 1e9 - cost.cash);
   // upgrading an existing building needs no slot, and maxes at level 3
   assert.ok(G.build(home, 'solar').ok); assert.ok(G.build(home, 'solar').ok);
@@ -444,13 +444,13 @@ test('buildings: elevators cut all costs; warp gates and orbital habitats do wha
   const home = G.state.home;
   G.state.cash = 1e13; G.state.research = 1e12;
   unlock(G, 'electricity', 'rocketry', 'orbit', 'station', 'reusable', 'internet', 'computing', 'satellites', 'radio', 'ai', 'nanotubes', 'habitat', 'fusion', 'photovoltaics', 'antimatter', 'warp');
-  G.state.stars[home].r = 5; G.state.stars[home].b = 5; G.state.stars[home].o = 5; G.recalc(); // 15 levels = 5 slots
+  G.state.stars[home].r = 5; G.state.stars[home].b = 0; G.state.stars[home].o = 5; G.recalc(); // 10 levels = 3 slots (and no beacon speed to cap the warp gate)
   const claim0 = G.claimCost();
   assert.ok(G.build(home, 'elevator').ok);
   assert.ok(G.claimCost() < claim0, 'a space elevator makes everything cheaper');
   const cap0 = G.d.cap[home], rate0 = G.d.rate[home];
   assert.ok(G.build(home, 'habitat').ok);
-  const tr = G.traitRev[home], tc = SKY.stars[home] && G.traitsOf(home).reduce((a, k) => a + (G.TRAITS[k].cap || 0), 0);
+  const tr = G.profileOf(home).rev * G.d.starK, tc = G.profileOf(home).cap * G.d.starK;
   assert.ok(Math.abs(G.d.cap[home] / cap0 - (1.5 + tc) / (1 + tc)) < 0.01, 'habitat adds 50% storage');
   assert.ok(Math.abs(G.d.rate[home] / rate0 - (1.6 + tr) / (1 + tr)) < 0.01, 'habitat adds 60% revenue');
   const sec0 = G.travelSeconds(home, 5, false);
@@ -490,25 +490,41 @@ test('technology: one project at a time, in real time, unlocking buildings and p
   assert.equal(done.size, G.TECHS.length, 'no unreachable technologies');
 });
 
-test('survey traits: deterministic per star, applied to revenue, revealed on colonising', () => {
+test('stars: spectral class and brightness give fixed bonuses, with the real types for the named stars', () => {
+  const C = G0().Corp;
+  // classes follow the usual B-V boundaries
+  const letters = [[-0.4, 'O'], [-0.2, 'B'], [0.0, 'A'], [0.2, 'A'], [0.4, 'F'], [0.7, 'G'], [1.0, 'K'], [1.5, 'M']];
+  for (const [bv, l] of letters) assert.equal(C.spectralLetter(bv), l, 'B-V ' + bv);
   const G = mk('Sirius', 2);
-  const H = mk('Vega', 5);
-  for (let i = 0; i < SKY.stars.length; i += 17) assert.deepEqual(G.traitsOf(i), H.traitsOf(i), 'same stars, same traits');
-  let withTraits = 0, habitable = null;
-  for (let i = 0; i < SKY.stars.length; i++) { if (G.traitsOf(i).length) withTraits++; if (habitable === null && G.traitsOf(i).includes('habitable')) habitable = i; }
-  assert.ok(withTraits > SKY.stars.length * 0.5 && withTraits < SKY.stars.length * 0.85);
-  assert.ok(habitable !== null);
-  const plain = SKY.stars.findIndex((s, i) => !G.traitsOf(i).length && i !== G.state.home && G.cls[i] === G.cls[habitable] && Math.abs(s[3] - SKY.stars[habitable][3]) < 0.5);
-  claimMany(G, [habitable]);
-  assert.ok(G.surveyText(habitable).includes('Habitable moon'));
-  assert.ok(G.traitRev[habitable] >= 0.35 - 1e-6);
-  assert.ok(G.surveyText(plain >= 0 ? plain : 0).length > 0);
-  // the colonisation log reveals the survey
+  const byName = n => G.profileOf(G.nameIdx.get(n));
+  assert.equal(byName('Aldebaran').letter, 'K', 'Aldebaran is K5III even though its colour index looks M');
+  assert.equal(byName('Polaris').letter, 'F'); assert.equal(byName('Betelgeuse').letter, 'M'); assert.equal(byName('Rigel').letter, 'B'); assert.equal(byName('Sirius').type, 'A1V');
+  assert.ok(!byName('Sirius').estimated && G.profileOf(300).estimated || SKY.stars[300][7], 'only the named stars have real types');
+  // brightness tiers
+  assert.equal(byName('Sirius').tier.name, 'Beacon'); assert.equal(byName('Polaris').tier.name, 'Brilliant');
+  const mid = SKY.stars.findIndex(s => s[3] > 2.2 && s[3] < 2.8), faint = SKY.stars.findIndex(s => s[3] > 3.5);
+  assert.equal(G.profileOf(mid).tier.name, 'Bright'); assert.equal(G.profileOf(faint).tier, null);
+  // the bonuses: hot stars pay more, white ones research, orange and red ones store more
+  const rep = l => SKY.stars.findIndex((s, i) => !s[7] && G.profileOf(i).letter === l);
+  assert.ok(G.profileOf(rep('B')).rev > 0.2 && G.profileOf(rep('A')).res > 0 && G.profileOf(rep('K')).cap > 0 && G.profileOf(rep('M')).cap > G.profileOf(rep('K')).cap);
+  // they average out to about the same as the old surveys did, so the pace is unchanged
+  const mean = f => SKY.stars.reduce((a, s, i) => a + f(G.profileOf(i)), 0) / SKY.stars.length;
+  assert.ok(mean(p => p.rev) > 0.07 && mean(p => p.rev) < 0.11, 'average revenue bonus ' + mean(p => p.rev));
+  assert.ok(mean(p => p.res) * 3600 > 18 && mean(p => p.res) * 3600 < 34, 'average research bonus');
+  // they are applied: a lone B star earns its class bonus on top of everything else
+  const b = rep('B');
+  claimMany(G, [b]);
+  const bare = G.baseRate[b] * G.d.routeMul[b] * G.d.globalOut;
+  assert.ok(Math.abs(G.d.rate[b] / bare - (1 + G.profileOf(b).rev)) < 1e-6, 'class bonus is part of the revenue');
+  // the Academy's star topic scales them
+  const k0 = G.d.starK; G.state.quiz.astro = {}; assert.equal(k0, 1);
+  // the colonisation log names the class
   const F = mk('Sirius', 2); F.state.cash = 1e6;
   const nb = F.adj[F.state.home][0].to;
   const l = F.launch(nb); F.catchUp(l.sec + 1);
-  assert.ok(F.state.log.some(e => /Colonised/.test(e.text) && /Survey:/.test(e.text)));
+  assert.ok(F.state.log.some(e => /Colonised/.test(e.text) && /class [OBAFGKM] star/.test(e.text)));
 });
+function G0() { return Engine.create(SKY); }
 
 test('market conditions: random, timed, only while playing; they change revenue; the share price follows the company', () => {
   const G = mk('Sirius', 8);
@@ -591,31 +607,91 @@ test('routes: upgrading raises trade output and speeds fleets; levels cap', () =
   assert.ok(!G.upgradeRoute(unclaimedEdge).ok, 'needs both stars claimed');
 });
 
-test('lanes: buildable links only between claimed stars, then act as real routes (and survive a save)', () => {
+test('trade lanes are gone: only figure lines and hyperlanes are routes, and old saves are refunded', () => {
+  assert.ok(SKY.edges.every(e => e[2] >= -1), 'no buildable lanes in the data');
+  assert.equal(SKY.edges.length, 887);
   const G = mk('Sirius', 2);
-  const home = G.state.home;
-  const region = regionOf(G, home, 3);
-  claimMany(G, region);
-  G.state.cash = 1e12;
-  const lane = region.map(i => G.buildableLanes(i).map(l => ({ a: i, ...l }))).flat()[0];
-  assert.ok(lane, 'a buildable lane exists within the region');
-  assert.ok(G.isBuildable(lane.e) && !G.edgeActive(lane.e));
-  assert.ok(!G.adj[lane.a].some(n => n.e === lane.e), 'not a route until built');
-  const routes0 = G.d.routes, rate0 = G.d.totalRate;
-  assert.ok(G.buildLane(lane.e).ok);
-  assert.ok(G.adj[lane.a].some(n => n.e === lane.e) && G.adj[lane.other].some(n => n.e === lane.e));
-  assert.equal(G.d.routes, routes0 + 1);
-  assert.ok(G.d.totalRate > rate0);
-  assert.ok(!G.buildLane(lane.e).ok, 'cannot build twice');
-  assert.ok(G.upgradeRoute(lane.e).ok, 'built lanes can be upgraded too');
-  const outside = SKY.edges.findIndex((e, i) => G.isBuildable(i) && !G.state.stars[e[0]]);
-  assert.ok(!G.buildLane(outside).ok, 'both ends must be claimed');
-  const H = Engine.create(SKY); H.load(JSON.parse(G.serialize()));
-  assert.ok(H.adj[lane.a].some(n => n.e === lane.e), 'built lane restored from save');
-  assert.equal(H.d.routes, G.d.routes);
-  // the base graph is untouched: a fresh game has no built lanes
-  const F = Engine.create(SKY); F.newGame(0);
-  assert.ok(!F.adj.some(a => a.some(n => F.isBuildable(n.e))));
+  for (const f of ['buildLane', 'canBuildLane', 'laneCost', 'buildableLanes', 'isBuildable', 'edgeActive']) assert.equal(G[f], undefined, f + ' is retired');
+  assert.equal(G.state.built, undefined);
+  // a version 4 save with built lanes loads, drops them and refunds the cash
+  const old = JSON.parse(G.serialize());
+  old.version = 4; old.built = { 900: 1, 901: 2, 1200: 3 }; old.routeLvl = { 5: 1, 900: 2 }; old.stats.lanes = 3;
+  const cash0 = old.cash, H = Engine.create(SKY); H.load(old);
+  assert.equal(H.state.version, Engine.SAVE_VERSION);
+  assert.equal(H.state.built, undefined); assert.deepEqual(H.state.routeLvl, { 5: 1 });
+  assert.ok(H.state.cash > cash0 + 3 * 20, 'three lanes refunded');
+  assert.ok(H.state.log.some(e => /Trade lanes were retired/.test(e.text)));
+  assert.equal(H.state.laneRefund, undefined);
+  H.catchUp(100);
+});
+
+test('flagships: the named stars collect royalties, never bank themselves, and pay a premium', () => {
+  const G = mk('Sirius', 2);
+  const home = G.state.home, S = G.state;
+  assert.equal(G.FLAGS.length, 20); assert.ok(G.isFlagship(home));
+  claimMany(G, regionOf(G, home, 2).filter(i => !S.stars[i]));
+  const others = G.d.claimed.filter(i => i !== home && !G.isFlagship(i));
+  assert.ok(others.length >= 6);
+  // royalties: the flagship's vault gets its own revenue plus a share of every colony in its sector
+  const ownedFlags = G.d.claimed.filter(i => G.isFlagship(i));
+  let expected = {}; ownedFlags.forEach(f => { expected[f] = G.d.rate[f]; });
+  for (const i of others) { const f = G.sectorOf(i); assert.ok(G.isFlagship(f) && S.stars[f]); expected[f] += G.d.rate[i] * G.CFG.royaltyShare; }
+  for (const f of ownedFlags) assert.ok(Math.abs(G.d.accr[f] - expected[f]) < 1e-9, 'vault income of ' + SKY.stars[f][6]);
+  for (const i of others) assert.ok(Math.abs(G.d.accr[i] - G.d.rate[i] * (1 - G.CFG.royaltyShare)) < 1e-9);
+  assert.ok(Math.abs(G.d.claimed.reduce((a, i) => a + G.d.accr[i], 0) - G.d.totalRate) < 1e-6, 'royalties move money, they do not make any');
+  // each colony remits to the nearest flagship you own
+  const sep = (i, f) => G.Corp && Engine.sepDeg(SKY.stars[i], SKY.stars[f]);
+  for (const i of others) for (const f of ownedFlags) assert.ok(sep(i, G.sectorOf(i)) <= sep(i, f) + 1e-9);
+  // the vault holds a day, ordinary colonies hold their class's hours
+  assert.ok(Math.abs(G.stockCap(home) - G.d.accr[home] * G.CFG.flagshipCapH * 3600 * (1 + G.profileOf(home).cap)) < 1e-6);
+  // nothing banks a flagship: not Treasury technology, not a Clearing House
+  unlock(G, 'telegraph', 'electricity', 'computing', 'eft');
+  assert.ok(Math.abs(G.d.P.auto - 0.55) < 1e-9);
+  const ord = others[0];
+  assert.ok(Math.abs(G.d.auto[ord] - 0.55) < 1e-6, 'ordinary colonies bank 55%');
+  assert.equal(G.d.auto[home], 0, 'the flagship banks nothing');
+  G.state.cash = 1e9; G.state.research = 1e6; G.state.stars[home].r = 3; G.recalc();
+  assert.ok(G.build(home, 'clearing').ok);
+  assert.equal(G.d.auto[home], 0); assert.equal(G.d.autoRes[home], 0);
+  assert.ok(G.d.auto[ord] > 0.55 && G.d.autoRes[ord] > 0, 'a Clearing House stacks on top for ordinary colonies');
+  // collecting pays the premium, and one-tap constellation collection leaves flagships alone
+  G.tick(3 * 3600, false);
+  const stock = S.stars[home].s, cash0 = S.cash;
+  const r = G.collect(home);
+  assert.ok(r.flagship && Math.abs(r.bonus - stock * G.CFG.flagshipPremium) < 1e-6 && Math.abs(S.cash - cash0 - stock * (1 + G.CFG.flagshipPremium)) < 1e-6);
+  assert.equal(S.stats.flagCollects, 1);
+  G.tick(3 * 3600, false);
+  const c = SKY.stars[home][5];
+  const kept0 = S.stars[home].s;
+  const cc = G.collectConstellation(c);
+  assert.equal(S.stars[home].s, kept0, 'the flagship keeps its own books'); assert.ok(cc.kept >= 1);
+  // ready: a flagship asks for a visit once its vault is worth four hours
+  assert.ok(!G.attention().some(a => a.star === home), 'three hours is not yet worth a trip');
+  G.tick(2 * 3600, false);
+  assert.ok(G.attention().some(a => a.star === home && a.why === 'flagship'));
+});
+
+test('every stage of the game still needs visits to the important stars', () => {
+  // at each corporate rank, with every automation researched and a Clearing House at the flagship's neighbours,
+  // a large share of the income still waits in flagship vaults
+  const G = mk('Sirius', 2);
+  const S = G.state, home = S.home;
+  unlock(G, 'telegraph', 'electricity', 'computing', 'eft', 'radio', 'internet', 'satellites', 'orbit', 'rocketry', 'payments');
+  assert.ok(Math.abs(G.d.P.auto - 0.8) < 1e-9);
+  const order = [home]; const seen = new Set([home]);
+  for (let k = 0; k < order.length && order.length < 760; k++) for (const { to } of G.adj[order[k]]) if (!seen.has(to)) { seen.add(to); order.push(to); }
+  const shares = [];
+  for (let rank = 0; rank < Engine.create(SKY).RANKS.length; rank++) {
+    const need = Math.min(order.length, Engine.create(SKY).RANKS[rank].at);
+    claimMany(G, order.slice(0, need).filter(i => !S.stars[i]));
+    // buildings everywhere possible: Clearing Houses on the best-connected colonies
+    S.cash = 1e12; S.research = 1e10;
+    for (const i of order.slice(0, need).filter(i => !G.isFlagship(i)).slice(0, 4)) { S.stars[i].r = 3; G.recalc(); if (G.canBuild(i, 'clearing').ok) { G.build(i, 'clearing'); G.build(i, 'clearing'); G.build(i, 'clearing'); } }
+    G.recalc();
+    shares.push([G.rankInfo().title, G.d.count, +G.d.manualShare.toFixed(3), G.d.claimed.filter(i => G.isFlagship(i)).length]);
+    assert.ok(G.d.manualShare >= 0.25, G.rankInfo().title + ': ' + (G.d.manualShare * 100).toFixed(0) + '% of income needs a visit with ' + G.d.count + ' colonies (' + JSON.stringify(shares) + ')');
+    assert.ok(G.d.claimed.some(i => G.isFlagship(i)), 'at least one flagship at every stage');
+  }
 });
 
 test('quests: story quests complete from state and pay out once; contracts refresh', () => {
@@ -717,13 +793,43 @@ test('shortcut helpers: expansion targets, Messier targets and numbered building
   assert.deepEqual(G.buildOptions(999999), [], 'unknown or unowned stars have no rows');
 });
 
-test('attention lists the fullest storage first', () => {
+test('attention lists flagships first, then the fullest storage', () => {
   const G = mk();
   G.state.cash = 1e6;
   for (let k = 0; k < 4; k++) { const t = G.expansionTargets()[0]; assert.ok(G.launch(t).ok); G.catchUp(3000); }
   G.tick(1e6, false);
   const full = G.attention();
   assert.ok(full.length >= 3);
-  for (let k = 1; k < full.length; k++) assert.ok(full[k - 1].cash >= full[k].cash);
-  assert.ok(full.every(f => f.why === 'full'));
+  for (let k = 1; k < full.length; k++) if (full[k - 1].why === full[k].why) assert.ok(full[k - 1].cash >= full[k].cash);
+  const firstPlain = full.findIndex(f => f.why === 'full');
+  assert.ok(firstPlain < 0 || full.slice(firstPlain).every(f => f.why === 'full'), 'flagships come first');
+  assert.ok(full.every(f => f.why === 'full' || f.why === 'flagship'));
+  assert.ok(full.some(f => f.why === 'flagship'), 'the headquarters is a flagship');
+});
+
+test('quiz: Messier photo questions ask for the number or the name, and the wrong answers look more alike as you learn it', () => {
+  const G = mk('Sirius', 3);
+  const QZ = Quiz.create(G, { rng: seeded(9), now: () => 1e12 });
+  const sameTypeCount = (q, M) => q.options.filter(o => o.text !== q.options[q.answer].text).filter(o => {
+    const x = SKY.messier.find(m => (q.kind.endsWith('num') || q.kind === 'm-num-pic' ? 'M' + m.n === o.text : (o.text.replace(/ \(M\d+\)$/, '') === m.alt))); return x && x.tname === M.tname; }).length;
+  for (const kind of ['m-pic-num', 'm-pic-name', 'm-num-pic', 'm-name-pic']) {
+    const avg = box => {
+      SKY.messier.forEach((m, i) => { G.state.quiz.messier[i] = { ok: box, bad: 0, last: 0, box, due: 0, learned: 0 }; });
+      let total = 0, count = 0;
+      for (let n = 0; n < 120; n++) {
+        const q = QZ.build(kind); checkQuestion(q);
+        const M = SKY.messier[q.subject.id];
+        assert.equal(q.options.length, 4);
+        const right = q.options[q.answer];
+        if (kind === 'm-pic-num') { assert.equal(right.text, 'M' + M.n); assert.equal(q.visual.m, q.subject.id); }
+        if (kind === 'm-pic-name') { assert.equal(right.text, M.alt); assert.ok(M.alt && !/asterism|patch/i.test(M.alt)); }
+        if (kind === 'm-num-pic') { assert.equal(right.visual.m, q.subject.id); assert.ok(q.prompt.includes('M' + M.n)); assert.ok(q.options.every(o => o.visual && o.visual.type === 'messier')); }
+        if (kind === 'm-name-pic') { assert.equal(right.visual.m, q.subject.id); assert.ok(q.prompt.includes(M.alt)); }
+        total += sameTypeCount(q, M); count++;
+      }
+      return total / count;
+    };
+    const novice = avg(0), expert = avg(7);
+    assert.ok(expert > novice + 0.6, kind + ': look-alikes grow from ' + novice.toFixed(2) + ' to ' + expert.toFixed(2));
+  }
 });
