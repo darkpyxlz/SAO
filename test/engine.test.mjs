@@ -29,10 +29,7 @@ test('graph is connected', () => {
   assert.equal(seen.size, SKY.stars.length);
 });
 
-test('only important stars keep proper names; the rest use official designations', () => {
-  const named = SKY.stars.filter(s => s[7]);
-  assert.ok(named.length >= 30 && named.length <= 80, 'named: ' + named.length);
-  named.forEach(s => assert.ok(s[3] <= 2.0 || ['Polaris', 'Algol', 'Mira', 'Thuban', 'Albireo', 'Mizar', 'Sadr'].includes(s[6]), s[6]));
+test('every non-named star uses an official designation', () => {
   SKY.stars.filter(s => !s[7]).forEach(s => assert.match(s[6], /^([\u03b1-\u03c9]\S* [A-Za-z]{2,3}|\d+ [A-Za-z]{2,3}|[A-Z]{1,2}\d* [A-Za-z]{2,3}|V\d+ [A-Za-z]{2,3}|HD \d+|HIP \d+)$/, s[6]));
 });
 
@@ -147,11 +144,11 @@ test('events wait for the player: offline time never expires them', () => {
   const ori = SKY.consts.filter(c => ['Ori', 'CMa', 'Tau', 'Gem', 'Lep'].includes(c.id)).flatMap(c => c.stars);
   claimAll(G, ori);
   G.spawnEvent();
-  const rem = G.state.events[0].remaining;
+  const first = G.state.events[0], rem = first.remaining;
   G.catchUp(7 * 86400);
   assert.equal(G.state.events[0].remaining, rem);
   G.tick(rem + 1, true);
-  assert.equal(G.state.events.length, 0);
+  assert.ok(G.state.events.every(e => e.id !== first.id), 'the original event expired once the player was active');
 });
 
 test('save round-trips', () => {
@@ -178,31 +175,115 @@ test('old v1 saves migrate (wonder fields are dropped)', () => {
 test('no unique powers: only Messier objects change global modifiers', () => {
   const G = mk('Sirius');
   assert.deepEqual(G.d.P, { out: 0, speed: 0, slots: 0, ins: 0, cost: 0, cap: 0, ev: 0 });
-  for (const n of ['Aldebaran', 'Regulus', 'Antares', 'Fomalhaut']) G.state.stars[G.nameIdx.get(n)] = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0 };
+  for (const n of ['Aldebaran', 'Antares', 'Fomalhaut', 'Spica']) G.state.stars[G.nameIdx.get(n)] = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0 };
   G.recalc();
   assert.equal(G.d.P.out, 0, 'no Royal Stars bonus');
 });
 
-test('pacing sketch: a played-through economy keeps growing', () => {
-  // naive bot: collect, claim cheapest frontier star, upgrade radiance; 3 visits a day for 30 days
+test('pacing sketch: a casual bot (3 visits a day) claims the whole sky in about one to two weeks', () => {
   const G = mk('Sirius', 11);
   const day = 86400;
-  const snaps = [];
-  for (let d = 0; d < 30; d++) {
+  const snaps = {}; let doneDay = null;
+  for (let d = 1; d <= 30 && doneDay === null; d++) {
     for (let v = 0; v < 3; v++) {
       G.catchUp(day / 3);
       for (const i of G.d.claimed) G.collect(i);
-      for (let guard = 0; guard < 40; guard++) {
-        const f = [...G.frontier()].filter(t => G.canLaunchTo(t).ok);
-        const up = G.d.claimed.filter(i => G.state.stars[i].r < 5).sort((a, b) => G.upgradeCost(a, 'r') - G.upgradeCost(b, 'r'))[0];
-        if (f.length && G.state.starlight >= G.claimCost() * 1.2) { G.launch(f[0]); continue; }
-        if (up !== undefined && G.state.starlight >= G.upgradeCost(up, 'r') && G.state.starlight > G.claimCost()) { G.upgrade(up, 'r'); continue; }
+      for (let guard = 0; guard < 80; guard++) {
+        const cand = new Set(G.frontier());
+        for (const p of G.targetsPending()) for (const n of G.adj[p]) if (!G.state.stars[n.to]) cand.add(n.to);
+        const f = [...cand].filter(x => G.canLaunchTo(x).ok).sort((a, b) => SKY.stars[a][3] - SKY.stars[b][3]);
+        const ups = [];
+        for (const i of G.d.claimed) for (const tr of ['r', 'b']) if (G.state.stars[i][tr] < 5) ups.push([i, tr, G.upgradeCost(i, tr)]);
+        ups.sort((a, b) => a[2] - b[2]);
+        const cc = G.claimCost();
+        if (f.length && G.state.starlight >= cc) { G.launch(f[0]); continue; }
+        if (ups[0] && G.state.starlight >= ups[0][2] && ups[0][2] < cc * 0.4) { G.upgrade(ups[0][0], ups[0][1]); continue; }
         break;
       }
     }
-    if (d % 5 === 4) snaps.push(`day ${d + 1}: ${G.d.count} stars, ${G.fmt(G.d.totalRate * 3600)}/h`);
+    if ([1, 3, 7, 10].includes(d)) snaps[d] = G.d.count;
+    if (G.d.count + G.targetsPending().size >= SKY.stars.length) doneDay = d;
   }
-  console.log('\n' + snaps.join('\n'));
-  assert.ok(G.d.count > 100);
-  assert.ok(G.d.count < 500, 'should not run away in 30 days of casual play');
+  console.log('\nstars after day 1/3/7/10:', JSON.stringify(snaps), 'all claimed by day', doneDay);
+  assert.ok(doneDay !== null && doneDay >= 6 && doneDay <= 20, 'finished on day ' + doneDay);
+});
+
+// ---------------------------------------------------------------- Sky School
+const Quiz = require('../js/quiz.js');
+
+function checkQuestion(q) {
+  assert.ok(q.prompt && q.kind && q.subject, 'shape ' + q.kind);
+  assert.ok(q.options.length >= 2 && q.options.length <= 4, q.kind + ' option count');
+  assert.ok(q.answer >= 0 && q.answer < q.options.length, q.kind + ' answer index');
+  const texts = q.options.map(o => o.text);
+  assert.equal(new Set(texts).size, texts.length, q.kind + ' duplicate options: ' + texts.join('|') + ' / ' + q.prompt);
+  texts.forEach(t => assert.ok(t && t.length, q.kind + ' empty option'));
+  if (q.visual) assert.ok(['figure', 'marked', 'messier'].includes(q.visual.type));
+  if (q.kind === 'const-pick' || q.kind === 'm-type-pic') q.options.forEach(o => assert.ok(o.visual, q.kind + ' option visual'));
+  assert.ok(q.explain && q.explain.length > 10);
+  if (q.kind === 'const-lore') assert.ok(!q.quote.toLowerCase().startsWith(SKY.consts[q.subject.id].name.toLowerCase()), 'lore masks the name');
+}
+
+test('quiz: every question kind builds valid, unambiguous questions', () => {
+  const G = mk('Sirius', 21);
+  // give the player a spread of claimed stars so designation questions exist
+  SKY.stars.forEach((s, i) => { if (i % 5 === 0) G.state.stars[i] = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0 }; });
+  G.recalc();
+  const QZ = Quiz.create(G, { rng: seeded(5), now: () => 1e12 });
+  const seenKinds = new Set();
+  for (let n = 0; n < 150; n++) {
+    for (const cat of ['const', 'star', 'messier', 'mixed']) {
+      const r = QZ.startRound(cat);
+      assert.equal(r.qs.length, 5, cat + ' round length');
+      r.qs.forEach(q => { checkQuestion(q); seenKinds.add(q.kind); });
+      const subjects = r.qs.map(q => q.subject.cat + ':' + q.subject.id);
+      assert.equal(new Set(subjects).size, subjects.length, 'no repeated subject in a round');
+    }
+  }
+  for (const kinds of Object.values(Quiz.create(G).KINDS)) kinds.forEach(k => assert.ok(seenKinds.has(k), 'kind generated: ' + k));
+});
+
+test('quiz: rewards, first-time bonus, cooldown, streaks, perfect round and learning', () => {
+  let t = 1e12;
+  const G = mk('Sirius', 4);
+  const QZ = Quiz.create(G, { rng: seeded(9), now: () => t });
+  const before = G.state.starlight;
+  let r = QZ.startRound('const');
+  const first = QZ.answer(r, r.qs[0].answer);
+  assert.ok(first.correct && first.reward.starlight > 0 && first.reward.item === Quiz.REWARD.firstTime);
+  assert.ok(G.state.starlight > before);
+  const wrong = QZ.answer(r, (r.qs[1].answer + 1) % r.qs[1].options.length);
+  assert.ok(!wrong.correct && wrong.reward.starlight === 0);
+  assert.equal(r.streak, 0);
+  // same subject again straight away pays only a trickle; after the cooldown it pays full
+  const subj = r.qs[0].subject;
+  const mkQ = () => ({ kind: 'x', cat: subj.cat, subject: subj, prompt: 'p', options: [{ text: 'a' }, { text: 'b' }], answer: 0, explain: 'e' });
+  let rr = { cat: 'const', qs: [mkQ(), mkQ()], i: 0, correct: 0, streak: 0, best: 0, earned: { starlight: 0, insight: 0 }, answers: [], done: false };
+  const soon = QZ.answer(rr, 0);
+  assert.equal(soon.reward.item, Quiz.REWARD.tooSoon);
+  t += 7 * 3600 * 1000;
+  const later = QZ.answer(rr, 0);
+  assert.equal(later.reward.item, Quiz.REWARD.repeat);
+  assert.ok(later.reward.streak > 1, 'streak multiplier');
+  assert.ok(rr.done && rr.bonus, 'perfect round bonus paid');
+  assert.ok(QZ.learned(subj.cat, subj.id), 'two correct answers = learned');
+  const st = G.state.quiz.stats;
+  assert.ok(st.answered >= 4 && st.correct >= 3 && st.rounds >= 1 && st.perfect >= 1 && st.bestStreak >= 2);
+  // save round-trip keeps quiz progress
+  const H = Engine.create(SKY); H.load(JSON.parse(G.serialize()));
+  assert.equal(H.state.quiz.stats.correct, st.correct);
+});
+
+test('quiz: old saves without quiz data load', () => {
+  const G = mk();
+  const old = JSON.parse(G.serialize()); delete old.quiz;
+  const H = Engine.create(SKY); H.load(old);
+  assert.ok(H.state.quiz && H.state.quiz.messier);
+});
+
+test('named stars: exactly the 20 most important', () => {
+  const named = SKY.stars.filter(s => s[7]).map(s => s[6]).sort();
+  assert.equal(named.length, 20);
+  for (const n of ['Sirius', 'Polaris', 'Betelgeuse', 'Vega', 'Rigel']) assert.ok(named.includes(n), n);
+  assert.ok(!named.includes('Algol') && !named.includes('Mira'));
 });

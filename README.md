@@ -9,9 +9,9 @@ figures is a node (757 of them, with their real positions, brightness and colour
 trade routes; short "hyperlanes" join neighbouring constellations. All 110 Messier objects are special sites.
 It is a solo, PvE game with no decay: nothing is ever taken from you, and no star has special powers.
 
-Only the important stars carry proper names (Sirius, Betelgeuse, Polaris, Algol…, 54 of them). Every other
-star is shown by its official designation: Bayer letter (β Ori), Flamsteed number (61 Cyg), variable-star
-name, or HD / HIP catalogue number.
+Only the 20 most important stars carry proper names (the 19 brightest named stars, from Sirius to Deneb,
+plus Polaris). Every other star is shown by its official designation: Bayer letter (β Ori), Flamsteed number
+(61 Cyg), variable-star name, or HD / HIP catalogue number.
 
 ## How it plays
 
@@ -31,6 +31,14 @@ name, or HD / HIP catalogue number.
 - **Comets and novae** cut trade routes. Press *Redraw routes* and tap two stars to rebuild each missing
   line from memory: correct lines pay out, wrong guesses lower the payout, hints pay a quarter. Ignored
   events fade by themselves. Event clocks only run while the game is open, so they always wait for you.
+- **Sky School** (gold button): five-question minigames that pay Starlight and Insight. *Constellations*:
+  name a figure, pick the figure for a name, match a myth to a constellation, find a neighbour. *Stars*:
+  which star is circled, what colour is it, which is brighter, which constellation is it in. *Messier*:
+  what kind of object is this picture, which picture is a globular cluster / nebula / galaxy…, which
+  constellation holds M42, which number is the Crab Nebula. Rewards scale with your income: ×2.5 the first
+  time you get something right, a streak bonus, +50% for a perfect round, half for repeats (a trickle if
+  repeated within 6 hours). Get something right twice and it is marked *learned* in the Codex. The Messier
+  pictures are procedurally drawn illustrations of each object type (seeded per object), not photographs.
 - **Petitions**: stars sometimes ask for an upgrade, an expansion or a visit, and reward you for it.
 
 Progress autosaves to `localStorage`, with three manual slots and JSON export/import (Menu).
@@ -48,6 +56,8 @@ npm test             # engine tests: data integrity, economy pacing sketch, even
 | File | Purpose |
 |---|---|
 | `js/engine.js` | Pure game logic (no DOM). Costs, rates, fleets, orders, events, saves. |
+| `js/quiz.js` | Sky School logic (no DOM): question builders, scoring, rewards, learned tracking. |
+| `js/pics.js` | Procedural Messier-type illustrations (globular, open, spiral, elliptical, nebulae, planetary, remnant). |
 | `js/sky.js` | Flat wrapping map renderer (Miller projection), pan/zoom/pick, codex mini-charts. |
 | `js/ui.js` | Start screen, HUD, panels, Codex, redraw mode, saves, main loop. |
 | `js/data.js` | Generated sky data (do not edit by hand). |
@@ -59,7 +69,8 @@ To regenerate the data: `npm pack d3-celestial`, unpack it, then
 
 Tuning constants live in `CFG` at the top of `js/engine.js`. The test file includes a small bot that plays
 30 days at three visits a day, to sanity-check pacing after changes. (Roughly: a casual player at three
-visits a day claims every star in about two months; once a day takes around five or six.)
+visits a day claims every star in about 11 days; once a day takes around five weeks. Upgrades, Messier
+objects and mastering all 88 constellations take considerably longer.)
 
 ## Publishing
 

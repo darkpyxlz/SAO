@@ -101,16 +101,18 @@ const nodeConst = nodes.map(s => {
   return drawnBy.get(s.hip).has(c) ? c : owner.get(s.hip);
 });
 
-// --- labels: only important stars keep a proper name; everything else uses its official designation
-// (Bayer, then Flamsteed, then variable-star, then HD, then HIP).
-const IMPORTANT_MAG = 2.0;
-const IMPORTANT_EXTRA = new Set(['Polaris', 'Algol', 'Mira', 'Thuban', 'Albireo', 'Mizar', 'Sadr']);
+// --- labels: only the 20 most important stars keep a proper name (the 19 brightest named stars plus Polaris);
+// everything else uses its official designation (Bayer, then Flamsteed, then variable-star, then HD, then HIP).
+const IMPORTANT_BRIGHTEST = 19;
+const IMPORTANT_ALWAYS = ['Polaris'];
 const GREEK = /^[\u03b1-\u03c9\u0391-\u03a9]/;
+nodes.forEach(s => { if (MAG_OVERRIDE[s.hip] !== undefined) s.mag = MAG_OVERRIDE[s.hip]; });
+const importantHips = new Set(nodes.filter(s => names[s.hip] && names[s.hip].name).sort((a, b) => a.mag - b.mag).slice(0, IMPORTANT_BRIGHTEST).map(s => s.hip));
+nodes.forEach(s => { if (names[s.hip] && IMPORTANT_ALWAYS.includes(names[s.hip].name)) importantHips.add(s.hip); });
 nodes.forEach((s, i) => {
   const n = names[s.hip] || {};
   const c = n.c || nodeConst[i];
-  if (MAG_OVERRIDE[s.hip] !== undefined) s.mag = MAG_OVERRIDE[s.hip];
-  s.proper = !!n.name && (s.mag <= IMPORTANT_MAG || IMPORTANT_EXTRA.has(n.name));
+  s.proper = importantHips.has(s.hip);
   if (s.proper) s.label = n.name;
   else if (n.bayer && GREEK.test(n.bayer)) s.label = n.bayer + ' ' + c;
   else if (n.flam) s.label = n.flam + ' ' + c;

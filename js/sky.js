@@ -431,26 +431,33 @@
     const sc = Math.min((W - 2 * pad) / Math.max(1e-6, maxx - minx), (H - 2 * pad) / Math.max(1e-6, maxy - miny));
     const ox = W / 2 - ((minx + maxx) / 2) * sc, oy = H / 2 - ((miny + maxy) / 2) * sc;
     const P = i => { const p = pts.get(i); return [ox + p[0] * sc, oy + p[1] * sc]; };
-    const dev = !!S.devConst[c], master = !!S.masterConst[c];
+    const dev = !opts.quiz && !!S.devConst[c], master = !opts.quiz && !!S.masterConst[c];
+    const lit = i => opts.quiz || !!S.stars[i]; // quiz figures show every star, regardless of ownership
     for (const e of edges) {
-      const [a, b] = SKY.edges[e], A = !!S.stars[a], B = !!S.stars[b];
+      const [a, b] = SKY.edges[e], A = lit(a), B = lit(b);
       const pa = P(a), pb = P(b);
       ctx.strokeStyle = A && B ? (master ? 'rgba(255,217,138,.95)' : dev ? 'rgba(255,225,160,.85)' : 'rgba(190,215,255,.85)') : 'rgba(150,170,220,.28)';
       ctx.lineWidth = A && B ? 1.6 : 1;
       ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke();
     }
     ids.forEach(i => {
-      const st = SKY.stars[i], p = P(i), cl = !!S.stars[i];
+      const st = SKY.stars[i], p = P(i), cl = lit(i);
       const r = Math.max(1.8, 4.2 - 0.5 * st[3]) * (opts.big ? 1.25 : 0.9);
       const rgb = bvRGB(st[4]);
       ctx.fillStyle = cl ? 'rgb(' + rgb.join(',') + ')' : 'rgba(' + rgb.join(',') + ',.4)';
       ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, TAU); ctx.fill();
-      if (cl && opts.big) { ctx.strokeStyle = 'rgba(255,217,138,.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(p[0], p[1], r + 3, 0, TAU); ctx.stroke(); }
-      if (opts.big && (cl || st[7])) {
+      if (cl && opts.big && !opts.quiz) { ctx.strokeStyle = 'rgba(255,217,138,.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(p[0], p[1], r + 3, 0, TAU); ctx.stroke(); }
+      if (opts.big && !opts.quiz && (cl || st[7])) {
         ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left';
         ctx.fillStyle = cl ? 'rgba(235,240,255,.9)' : 'rgba(170,185,230,.6)'; ctx.fillText(st[6], p[0] + r + 4, p[1] + 4);
       }
     });
+    if (opts.mark !== undefined && pts.has(opts.mark)) { // quiz: circle one star
+      const p = P(opts.mark);
+      const g = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], 26); g.addColorStop(0, 'rgba(255,217,138,.45)'); g.addColorStop(1, 'rgba(255,217,138,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p[0], p[1], 26, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#ffd98a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p[0], p[1], 11, 0, TAU); ctx.stroke();
+    }
     if (opts.hit) { opts.hit.length = 0; ids.forEach(i => { const p = P(i); opts.hit.push({ i, x: p[0], y: p[1] }); }); }
   }
 

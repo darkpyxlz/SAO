@@ -21,23 +21,23 @@
   const MASTER_LEVELS = 9; // ... and for a "mastered" one
 
   const CFG = {
-    startStarlight: 100, baseOutput: 0.065,
-    secPerDeg: 10,
+    startStarlight: 100, baseOutput: 0.39,
+    secPerDeg: 3,
     messierTravelMul: 1.5,
     baseSlots: 3,
-    claimBase: 25, claimScale: 34, claimPow: 1.7, claimRamp: 14,
+    claimBase: 25, claimScale: 9, claimPow: 1.6, claimRamp: 14,
     upgradeSize: 0.03,
     messierInsightBase: 30, messierInsightStep: 6,
     messierStarlightFrac: 0.5,
     developMessierBase: 80, developMessierStep: 4,
     routeBonusComp: 0.12, routeBonusSame: 0.05, routeBeaconMul: 0.25,
     beaconSpeed: 0.07, speedFloor: 0.25,
-    insightPerObs: 0.004,
+    insightPerObs: 0.024,
     devBonus: 0.015, masterBonus: 0.025,
-    eventMinRoutes: 8, eventFirstDelay: [400, 900], eventGap: [1200, 2400],
+    eventMinRoutes: 8, eventFirstDelay: [150, 300], eventGap: [450, 900],
     cometSeconds: 900, novaSeconds: 1500,
     redrawBase: 60, redrawPerStar: 6,
-    petitionGap: [600, 1200], petitionMax: 3, orderMax: 12,
+    petitionGap: [240, 480], petitionMax: 3, orderMax: 40,
     maxOfflineSeconds: 60 * 86400,
     logMax: 250,
   };
@@ -91,13 +91,14 @@
     let S = null;
     let D = null; // derived
 
+    function blankQuiz() { return { const: {}, star: {}, messier: {}, stats: { answered: 0, correct: 0, rounds: 0, perfect: 0, bestStreak: 0 } }; }
     function blankState(home) {
       return {
         version: SAVE_VERSION, created: nowFn(), saved: nowFn(), clock: 0, active: 0,
         starlight: CFG.startStarlight, insight: 0, home,
         stars: {}, fleets: [], orders: [], messier: {}, devConst: {}, masterConst: {},
         events: [], eventTimer: rand(CFG.eventFirstDelay), petitions: [], petitionTimer: rand(CFG.petitionGap),
-        notes: {}, log: [], evSeq: 0, petitionSeq: 0, fleetSeq: 0, orderSeq: 0,
+        notes: {}, quiz: blankQuiz(), log: [], evSeq: 0, petitionSeq: 0, fleetSeq: 0, orderSeq: 0,
         stats: { collected: 0, claimed: 0, launched: 0, upgrades: 0, eventsDone: 0, perfect: 0, restoredRoutes: 0, petitionsDone: 0 },
       };
     }
@@ -123,6 +124,7 @@
       }
       if (!state || state.version !== SAVE_VERSION) throw new Error('Unsupported save');
       S = state;
+      if (!S.quiz) S.quiz = blankQuiz();
       recalc();
       return S;
     }
@@ -337,6 +339,9 @@
       return result(true, '', { gain, ins });
     }
     function canCollectConstellation(c) { return !!S.devConst[c]; }
+
+    // Rewards from outside the economy loop (the Sky School quizzes).
+    function grant(starlight, insight) { S.starlight += starlight || 0; S.insight += insight || 0; }
 
     // ---- petitions
     function addPetition() {
@@ -553,7 +558,7 @@
       newGame, load, recalc, tick, catchUp,
       claimCost, upgradeCost, messierCost, developMessierCost, travelSeconds,
       canLaunchTo, launch, cancelOrder, dispatch, frontierOrigins, targetsPending, canVisitMessier, visitMessier, messierAccess, developMessier,
-      upgrade, collect, collectConstellation, canCollectConstellation,
+      upgrade, collect, collectConstellation, canCollectConstellation, grant,
       spawnEvent, redraw, useHint, eventReward, dismissPetition, addPetition,
       consStatus, frontier, attention, messierStats, lvl, fmt, sepDeg,
       serialize() { S.saved = nowFn(); return JSON.stringify(S); },

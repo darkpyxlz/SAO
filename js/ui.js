@@ -25,6 +25,7 @@
   const KIND_NAMES = { globular: 'Globular clusters', open: 'Open clusters', nebula: 'Nebulae', galaxy: 'Galaxies', other: 'Other' };
   const KIND_ICON = { globular: '⊕', open: '⁘', nebula: '▣', galaxy: '◯', other: '◇' };
 
+  const QZ = Quiz.create(G);
   const sky = Sky.create(canvas, G, {
     onClick: (x, y) => handleMapClick(x, y),
     onHover: (x, y) => handleHover(x, y),
@@ -104,7 +105,7 @@
     ['Sirius', 'The brightest star in the night sky. Rich neighbours in Orion, Taurus and Gemini.'],
     ['Polaris', 'The North Star: the still point. Circles of the northern sky stretch out around it.'],
     ['Vega', 'Jewel of Lyra, and a short flight to the Summer Triangle.'],
-    ['Toliman', 'In the Centaur, the nearest stellar neighbours. A crowded southern start.'],
+    ['Acrux', 'Foot of the Southern Cross: a bright, crowded start deep in the south.'],
     ['Capella', 'A golden binary in Auriga, close to the winter hexagon.'],
     ['Arcturus', 'The orange giant of Boötes, a Spring-sky shepherd.'],
     ['Rigel', 'Blue supergiant at Orion’s foot: right next to the Hunter.'],
@@ -181,6 +182,16 @@
       toast(r.done ? (r.perfect ? 'Perfect redraw! +' + fmt(r.gain + r.bonus) : 'All routes restored! +' + fmt(r.gain)) : 'Route restored  +' + fmt(r.gain), 'good');
     } else toast(r.msg, 'bad');
     if (!G.state.events.find(e => e.id === R.id)) stopRedraw();
+  }
+
+  // ---------------------------------------------------------------- pictures and figures
+  function drawVisuals(root) {
+    root.querySelectorAll('canvas[data-vis]').forEach(cv => {
+      const [t, a, b] = cv.dataset.vis.split(':');
+      if (t === 'figure') Sky.drawChart(cv, G, +a, { big: true, quiz: true });
+      else if (t === 'marked') Sky.drawChart(cv, G, +a, { big: true, quiz: true, mark: +b });
+      else if (t === 'messier') Pics.draw(cv, SKY.messier[+a]);
+    });
   }
 
   // ---------------------------------------------------------------- panel
@@ -266,6 +277,7 @@
     h += '<div class="p-sub">' + KIND_ICON[M.kind] + ' ' + M.tname + ' · <span class="link" data-act="open-const" data-c="' + M.c + '">' + esc(con.name) + '</span> · mag ' + M.mag + (M.dim ? ' · ' + M.dim + '′' : '') + '</div>';
     const [pk, pv] = G.MESSIER_PERK[M.kind];
     const dev = vis && vis.dev;
+    if (vis) h += '<div class="p-pic"><canvas class="mpic" data-vis="messier:' + m + '"></canvas></div>';
     h += '<div class="p-sec"><h4>' + (vis ? 'Catalogued ' + dstr(vis.t) : 'Not yet visited') + '</h4>';
     if (vis && M.note) h += '<div class="lore">' + esc(M.note) + '</div>';
     h += '<div class="row"><span class="grow">' + esc(pk === 'slots' ? '+1 fleet slot per 3 globular clusters' : PERK_TXT(pk, pv * (dev ? 2 : 1))) + '</span>' + (dev ? '<span class="badge gold">doubled</span>' : '') + '</div>';
@@ -289,7 +301,7 @@
     const el = $('#panel');
     if (!ui.started || !ui.sel || ui.redraw) { el.hidden = true; document.body.classList.remove('has-panel'); lastPanelHtml = ''; return; }
     const html = ui.sel.type === 'star' ? starPanel(ui.sel.i) : messierPanel(ui.sel.i);
-    if (html !== lastPanelHtml) { el.innerHTML = html; lastPanelHtml = html; }
+    if (html !== lastPanelHtml) { el.innerHTML = html; lastPanelHtml = html; drawVisuals(el); }
     el.hidden = false; document.body.classList.add('has-panel');
     // live values
     if (ui.sel.type === 'star' && G.state.stars[ui.sel.i]) {
@@ -402,7 +414,7 @@
         if (f === 'unexp' && cs.claimed) continue;
         if (f === 'dev' && !cs.developed) continue;
         if (f === 'master' && !cs.mastered) continue;
-        h += '<div class="card ' + (cs.mastered ? 'master' : cs.developed ? 'dev' : cs.claimed ? '' : 'locked') + '" data-act="open-const" data-c="' + c + '"><canvas data-chart="' + c + '"></canvas><div class="t"><span>' + esc(SKY.consts[c].name) + '</span></div><div class="s">' + consBadge(cs) + '</div>' + (cs.developed ? '<span class="stamp">' + (cs.mastered ? '★' : '✦') + '</span>' : '') + '</div>';
+        h += '<div class="card ' + (cs.mastered ? 'master' : cs.developed ? 'dev' : cs.claimed ? '' : 'locked') + '" data-act="open-const" data-c="' + c + '"><canvas data-chart="' + c + '"></canvas><div class="t"><span>' + esc(SKY.consts[c].name) + '</span></div><div class="s">' + consBadge(cs) + (QZ.learned('const', c) ? ' <span class="badge cyan">learned</span>' : '') + '</div>' + (cs.developed ? '<span class="stamp">' + (cs.mastered ? '★' : '✦') + '</span>' : '') + '</div>';
       }
       body.innerHTML = h + '</div>';
       body.querySelectorAll('canvas[data-chart]').forEach(cv => Sky.drawChart(cv, G, +cv.dataset.chart));
@@ -417,11 +429,12 @@
         if (f === 'seen' && !v) return; if (f === 'todo' && v) return;
         if (KIND_NAMES[f] && M.kind !== f) return;
         h += '<div class="mcard ' + (v ? 'visited' : 'locked') + '" data-act="goto-messier" data-i="' + m + '"><div class="row"><span class="n">M' + M.n + '</span><span class="grow"></span><span>' + KIND_ICON[M.kind] + '</span></div>';
-        if (v) h += '<div><b>' + esc(M.alt || M.tname) + '</b></div><div class="muted tiny">' + M.tname + ' · ' + esc(SKY.consts[M.c].name) + ' · mag ' + M.mag + '</div><div class="note">' + esc(M.note) + '</div><div class="row tiny">' + '<span class="muted">' + dstr(v.t) + '</span>' + (v.dev ? '<span class="badge gold">doubled</span>' : '') + '</div>';
+        if (v) h += '<canvas class="mthumb" data-vis="messier:' + m + '"></canvas><div><b>' + esc(M.alt || M.tname) + '</b>' + (QZ.learned('messier', m) ? ' <span class="badge cyan">learned</span>' : '') + '</div><div class="muted tiny">' + M.tname + ' · ' + esc(SKY.consts[M.c].name) + ' · mag ' + M.mag + '</div><div class="note">' + esc(M.note) + '</div><div class="row tiny">' + '<span class="muted">' + dstr(v.t) + '</span>' + (v.dev ? '<span class="badge gold">doubled</span>' : '') + '</div>';
         else h += '<div class="muted">' + M.tname + '</div><div class="muted tiny">' + (reach ? '<span class="good">reachable</span>' : 'beyond your reach') + '</div>';
         h += '</div>';
       });
       body.innerHTML = h + '</div>';
+      drawVisuals(body);
     },
     stars(body) {
       const S = G.state;
@@ -429,17 +442,17 @@
       const got = named.filter(i => S.stars[i]);
       let h = '<div class="prog"><div class="row"><b>' + got.length + ' / ' + named.length + '</b><span class="muted">important stars claimed</span></div><div class="bar"><i style="width:' + (got.length / named.length * 100) + '%"></i></div></div>';
       h += '<div class="muted tiny" style="margin-bottom:8px">Only the brightest and most famous stars have proper names. Every other star is shown by its official designation (a Bayer letter such as \u03b2 Ori, a Flamsteed number such as 61 Cyg, or an HD / HIP catalogue number).</div>';
-      h += '<table class="t"><tr><th>Name</th><th>Constellation</th><th>Class</th><th>Mag</th><th></th></tr>';
+      h += '<table class="t"><tr><th>Name</th><th>Constellation</th><th>Class</th><th>Mag</th><th></th><th></th></tr>';
       for (const i of named) {
         const st = SKY.stars[i], cl = !!S.stars[i];
-        h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(2) + '</td><td>' + (cl ? '<span class="badge green">claimed</span>' : '<span class="badge">unclaimed</span>') + '</td></tr>';
+        h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(2) + '</td><td>' + (cl ? '<span class="badge green">claimed</span>' : '<span class="badge">unclaimed</span>') + '</td><td>' + (QZ.learned('star', i) ? '<span class="badge cyan">learned</span>' : '') + '</td></tr>';
       }
       body.innerHTML = h + '</table>';
     },
     chron(body) {
       const S = G.state, st = S.stats;
       let h = '<div class="stat-grid">';
-      const cards = [[Object.keys(S.stars).length + ' / ' + SKY.stars.length, 'stars claimed'], [Object.keys(S.messier).length + ' / 110', 'Messier catalogued'], [Object.keys(S.devConst).length + ' / 88', 'constellations developed'], [fmt(st.collected), 'Starlight collected'], [st.eventsDone, 'events resolved'], [st.perfect, 'perfect redraws'], [st.restoredRoutes, 'routes redrawn'], [st.petitionsDone, 'petitions answered'], [dur((Date.now() - S.created) / 1000), 'empire age']];
+      const cards = [[Object.keys(S.stars).length + ' / ' + SKY.stars.length, 'stars claimed'], [Object.keys(S.messier).length + ' / 110', 'Messier catalogued'], [Object.keys(S.devConst).length + ' / 88', 'constellations developed'], [fmt(st.collected), 'Starlight collected'], [st.eventsDone, 'events resolved'], [st.perfect, 'perfect redraws'], [st.restoredRoutes, 'routes redrawn'], [st.petitionsDone, 'petitions answered'], [S.quiz.stats.answered ? Math.round(S.quiz.stats.correct / S.quiz.stats.answered * 100) + '%' : '·', 'quiz accuracy (' + S.quiz.stats.answered + ' answers)'], [S.quiz.stats.perfect, 'perfect quiz rounds'], [S.quiz.stats.bestStreak, 'best quiz streak'], [dur((Date.now() - S.created) / 1000), 'empire age']];
       cards.forEach(([b, l]) => h += '<div class="stat"><b>' + b + '</b><span>' + l + '</span></div>');
       h += '</div>';
       const devs = Object.keys(S.devConst).map(Number).sort((a, b) => S.devConst[a] - S.devConst[b]);
@@ -465,7 +478,7 @@
     const S = G.state, cons = SKY.consts[c], cs = G.consStatus(c);
     const dev = cs.developed;
     let h = '<div class="cpage"><div><canvas class="big" id="cchart"></canvas><div class="muted tiny" style="margin-top:6px">Tap a star to find it on the map.</div></div><div>';
-    h += '<div class="row"><button class="btn small" data-act="open-codex">\u2190 Codex</button><span class="muted">' + (cons.en !== cons.name ? esc(cons.en) : '') + '</span><span class="grow"></span>' + consBadge(cs) + '</div>';
+    h += '<div class="row"><button class="btn small" data-act="open-codex">\u2190 Codex</button><span class="muted">' + (cons.en !== cons.name ? esc(cons.en) : '') + '</span><span class="grow"></span>' + (QZ.learned('const', c) ? '<span class="badge cyan">learned</span> ' : '') + consBadge(cs) + '</div>';
     h += cs.claimed ? '<p class="lore">' + esc(cons.lore) + '</p>' : '<p class="lore locked-lore">Unexplored. Claim a star here to learn its story.</p>';
     h += '<div class="p-sec" style="padding:8px 0"><h4>Bonus</h4>';
     h += '<div class="row"><span class="grow">Developed: every star claimed with ' + G.DEV_LEVELS + '+ levels</span>' + (dev ? '<span class="badge gold">+' + (G.CFG.devBonus * 100).toFixed(1) + '% Starlight</span>' : '<span class="muted tiny">+' + (G.CFG.devBonus * 100).toFixed(1) + '%</span>') + '</div>';
@@ -499,6 +512,79 @@
   }
   let saveTimer = null;
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(autosave, 800); }
+
+  // ---------------------------------------------------------------- Sky School (minigames)
+  ui.school = { view: 'menu', round: null, shown: null, learned: [] };
+  function openSchool() {
+    ui.school = { view: 'menu', round: null, shown: null, learned: [] };
+    ui.modal = { title: 'Sky School', tabs: null, render: renderSchool }; ui.tab = null;
+    $('#modal').hidden = false; renderModal();
+  }
+  const LETTERS = ['A', 'B', 'C', 'D'];
+  function renderSchool(body) {
+    const sc = ui.school, S = G.state, st = S.quiz.stats;
+    if (sc.view === 'menu') {
+      const base = QZ.rewardBase();
+      let h = '<p class="muted" style="margin-top:0;max-width:640px">Short rounds of five questions. Every correct answer pays Starlight and Insight worth about ' + QZ.REWARD.seconds / 60 + ' minutes of your income, <b>×' + QZ.REWARD.firstTime + '</b> the first time you get something right, plus a streak bonus and <b>+' + QZ.REWARD.perfectBonus * 100 + '%</b> for a perfect round. Answering something you already know pays half, and only a trickle if you answered it in the last 6 hours. Get something right twice and it is marked <span class="badge cyan">learned</span> in the codex.</p>';
+      h += '<div class="stat-grid"><div class="stat"><b>' + st.answered + '</b><span>answered</span></div><div class="stat"><b>' + (st.answered ? Math.round(st.correct / st.answered * 100) + '%' : '·') + '</b><span>accuracy</span></div><div class="stat"><b>' + st.bestStreak + '</b><span>best streak</span></div><div class="stat"><b>' + st.perfect + ' / ' + st.rounds + '</b><span>perfect rounds</span></div><div class="stat"><b class="gold">✦ ' + fmt(base.starlight) + '</b><span>per correct answer now</span></div></div>';
+      h += '<div class="school-cats">';
+      for (const cat of ['const', 'star', 'messier', 'mixed']) {
+        const info = Quiz.CATS[cat], pr = cat === 'mixed' ? null : QZ.progress(cat);
+        h += '<button class="school-cat" data-act="school-start" data-cat="' + cat + '"><b>' + info.name + '</b><span class="muted">' + info.blurb + '</span>' + (pr ? '<span class="tiny ' + (pr.learned ? 'cyan' : 'muted') + '">learned ' + pr.learned + ' / ' + pr.total + (pr.extra ? ' (+' + pr.extra + ' designations)' : '') + '</span>' : '<span class="tiny muted">all three kinds</span>') + '</button>';
+      }
+      body.innerHTML = h + '</div>';
+      return;
+    }
+    const r = sc.round;
+    if (sc.view === 'summary') {
+      const perfect = r.correct === r.qs.length;
+      let h = '<div class="school-sum"><h3 style="margin-top:0">' + (perfect ? '★ Perfect round!' : r.correct + ' of ' + r.qs.length + ' correct') + '</h3>';
+      h += '<div class="stat-grid"><div class="stat"><b class="gold">✦ ' + fmt(r.earned.starlight + (r.bonus ? r.bonus.starlight : 0)) + '</b><span>Starlight earned</span></div><div class="stat"><b class="cyan">◉ ' + fmt(r.earned.insight + (r.bonus ? r.bonus.insight : 0)) + '</b><span>Insight earned</span></div><div class="stat"><b>' + r.best + '</b><span>best streak</span></div></div>';
+      if (r.bonus) h += '<p class="good">Perfect-round bonus included: +' + fmt(r.bonus.starlight) + ' ✦ and +' + fmt(r.bonus.insight) + ' ◉.</p>';
+      if (sc.learned.length) h += '<p class="cyan">Newly learned: ' + sc.learned.map(esc).join(', ') + '</p>';
+      h += '<div class="row"><button class="btn primary" data-act="school-start" data-cat="' + r.cat + '">Another round</button><button class="btn" data-act="school-menu">Back to Sky School</button></div></div>';
+      body.innerHTML = h; return;
+    }
+    // a question (r.i has already advanced once an answer is showing)
+    const shown = sc.shown;
+    const idx = shown ? r.i - 1 : r.i;
+    const Q = r.qs[idx];
+    let h = '<div class="row tiny muted"><span>Question ' + (idx + 1) + ' / ' + r.qs.length + '</span><span class="grow"></span><span>streak ' + r.streak + '</span><span class="gold">✦ ' + fmt(r.earned.starlight) + '</span><span class="cyan">◉ ' + fmt(r.earned.insight) + '</span></div>';
+    h += '<h3 class="qprompt">' + esc(Q.prompt) + '</h3>';
+    if (Q.quote) h += '<blockquote class="lore">' + esc(Q.quote) + '</blockquote>';
+    if (Q.visual) h += '<canvas class="qvis' + (Q.visual.type === 'messier' ? ' pic' : '') + '" data-vis="' + Q.visual.type + ':' + (Q.visual.type === 'messier' ? Q.visual.m : Q.visual.c) + (Q.visual.type === 'marked' ? ':' + Q.visual.star : '') + '"></canvas>';
+    const visual = Q.options.some(o => o.visual);
+    h += '<div class="' + (visual ? 'qgrid' : 'qlist') + '">';
+    Q.options.forEach((o, k) => {
+      let cls = 'qopt';
+      if (shown) cls += k === Q.answer ? ' correct' : k === shown.choice ? ' wrong' : ' dim';
+      h += '<button class="' + cls + '" data-act="school-answer" data-i="' + k + '"' + (shown ? ' disabled' : '') + '>';
+      if (o.visual) h += '<canvas class="qthumb' + (o.visual.type === 'messier' ? ' pic' : '') + '" data-vis="' + o.visual.type + ':' + (o.visual.type === 'messier' ? o.visual.m : o.visual.c) + '"></canvas>';
+      h += '<span class="ql">' + LETTERS[k] + '</span>' + (visual && !shown ? '' : '<span class="qt">' + esc(o.text) + '</span>');
+      h += '</button>';
+    });
+    h += '</div>';
+    if (shown) {
+      const res = shown.res;
+      h += '<div class="qfeed ' + (res.correct ? 'ok' : 'no') + '"><b>' + (res.correct ? '✓ Correct' : '✗ Not quite: the answer is ' + esc(Q.options[Q.answer].text)) + '</b>';
+      if (res.correct) h += ' <span class="gold">+' + fmt(res.reward.starlight) + ' ✦</span> <span class="cyan">+' + fmt(res.reward.insight) + ' ◉</span> <span class="muted tiny">' + (res.reward.item >= 2 ? 'first time ×' + res.reward.item : 'repeat ×' + res.reward.item) + (res.reward.streak > 1 ? ' · streak ×' + res.reward.streak.toFixed(1) : '') + '</span>';
+      h += '<div class="tiny" style="margin-top:4px">' + esc(Q.explain) + '</div>';
+      h += '<div class="row" style="margin-top:8px"><button class="btn primary" data-act="school-next">' + (res.last ? 'See results' : 'Next question') + '</button></div></div>';
+    }
+    body.innerHTML = h;
+    drawVisuals(body);
+  }
+  function schoolAnswer(k) {
+    const sc = ui.school; if (!sc.round || sc.shown) return;
+    const q = sc.round.qs[sc.round.i];
+    const res = QZ.answer(sc.round, k);
+    if (res.learnedNow) {
+      const s = q.subject;
+      sc.learned.push(s.cat === 'const' ? SKY.consts[s.id].name : s.cat === 'star' ? SKY.stars[s.id][6] : 'M' + SKY.messier[s.id].n);
+      toast('Learned: ' + sc.learned[sc.learned.length - 1], 'good');
+    }
+    sc.shown = { choice: k, res };
+  }
 
   // ---------------------------------------------------------------- fleets & orders
   function openFleets() { ui.modal = { title: 'Fleets & orders', tabs: null, render: renderFleets }; ui.tab = null; $('#modal').hidden = false; renderModal(); }
@@ -541,6 +627,7 @@
         '<li><b>Trade routes</b>: neighbouring claimed stars boost each other, more when their colours differ.</li>' +
         '<li><b class="cyan">Messier objects</b> need a claimed star nearby and Insight. Each gives a bonus by type (globulars: fleet slots, open clusters: Starlight, nebulae: Insight, galaxies: speed).</li>' +
         '<li><b>Developed constellation</b>: every star claimed and at least ' + G.DEV_LEVELS + ' upgrade levels each. It is stamped in the Codex and unlocks one-tap collection there. <b>Mastered</b> at ' + G.MASTER_LEVELS + '.</li></ul>' +
+        '<h3>Sky School</h3><p>Open <b>Sky School</b> for five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, and identify Messier objects by picture and type. Correct answers pay Starlight and Insight (first discoveries pay the most), and things you get right twice are marked <b>learned</b>. The Messier pictures are illustrations of each object type, not photographs.</p>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
         '<h3>Petitions</h3><p>Stars sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. They are never penalties. Nothing in this game dims, decays or is taken from you.</p></div>';
     },
@@ -555,7 +642,11 @@
   const ACT = {
     'continue': () => { const s = readKey(AUTOSAVE); if (s) beginSession(s, false); },
     'newgame': el => { G.newGame(+el.dataset.i); beginSession(G.state, true); },
-    'open-codex': () => openCodex(), 'open-menu': () => openMenu(), 'open-fleets': () => openFleets(), 'close-modal': () => closeModal(),
+    'open-codex': () => openCodex(), 'open-menu': () => openMenu(), 'open-fleets': () => openFleets(), 'open-school': () => openSchool(),
+    'school-start': el => { ui.school = { view: 'q', round: QZ.startRound(el.dataset.cat), shown: null, learned: [] }; },
+    'school-answer': el => schoolAnswer(+el.dataset.i),
+    'school-next': () => { const sc = ui.school; sc.shown = null; if (sc.round.done) sc.view = 'summary'; },
+    'school-menu': () => { ui.school = { view: 'menu', round: null, shown: null, learned: [] }; }, 'close-modal': () => closeModal(),
     'tab': el => { ui.tab = el.dataset.tab; renderModal(); },
     'filter': el => { ui.filter[el.dataset.k] = el.dataset.v; renderModal(); },
     'zoom-in': () => sky.zoomBy(1.6), 'zoom-out': () => sky.zoomBy(1 / 1.6),
