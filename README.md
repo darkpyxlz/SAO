@@ -79,6 +79,19 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   its next review time and right/wrong counts, filters for due / waiting / learned, and a *Review due items*
   button that starts a round about exactly those. Messier questions use real photographs (with procedural
   illustrations as the fallback).
+- **Olympiad Academy** (Corporation → Academy, key `A`): the astronomy-olympiad syllabus as 264 spaced-repetition
+  cards in ten topics: *Sky & time*, *Orbital mechanics*, *Telescopes & optics*, *Light & radiation*, *Stars*,
+  *Magnitudes & distances*, *Stellar evolution*, *Solar system & exoplanets*, *Galaxies* and *Cosmology*. Cards are facts
+  asked several ways, **diagrams** to recognise (nine telescope designs, mounts and optical defects, conic orbits,
+  Lagrange points, Moon phases, the H–R diagram, spectra, blackbody curves, light curves, galaxy types…) and
+  **numerical problems with fresh numbers every time** (Kepler's third law, vis-viva, Hohmann transfers, Rayleigh and
+  Dawes limits, plate scales, Wien and Stefan–Boltzmann, Doppler shifts, distance moduli, Cepheids, the Hubble law,
+  radial-velocity amplitudes, Schwarzschild radii…). The wrong answers are the usual mistakes, and every answer has an
+  explanation. Practise a topic (or everything) in Sky School; each topic has a *study page* with a formula sheet and
+  labelled diagrams. A topic's mastery is the average progress of its cards, and it climbs three levels (at 20%, 50% and
+  85%). Each level is a **permanent** company-wide bonus that never decays: events (+30% at the top level of Sky & time),
+  ship speed (Orbital mechanics), research (Telescopes), trade routes (Light), the star bonuses themselves (+50% for
+  Stars), costs (Magnitudes), storage (Evolution), fleet slots (Solar system), and revenue (Galaxies, Cosmology).
 - **Petitions**: colonies sometimes ask for an upgrade, an expansion or a collection, and reward you for it.
 
 Progress autosaves to `localStorage`, with three manual slots and JSON export/import (Menu). Time away is
@@ -93,7 +106,7 @@ Keys are ignored while you type in a text box, and window keys toggle (press aga
 
 | Key | Does |
 |---|---|
-| `C` `Q` `S` `O` `T` `B` `F` | Codex, Quests, Sky School, Corporation overview, Technology, Buildings catalogue, Fleets |
+| `C` `Q` `S` `O` `T` `B` `A` `F` | Codex, Quests, Sky School, Corporation overview, Technology, Buildings catalogue, Olympiad Academy, Fleets |
 | `Esc` | Close the window, finish redrawing, deselect; with nothing to close it opens the menu |
 | `Space` | **Expand**: send a colony ship to the selected star, survey the selected Messier object (then study it in depth), or otherwise send a ship to the best-paying new star (next to the selected colony if one is selected). It never queues a charter on its own: with every ship out it asks you to pick a star |
 | `Shift` `Space` | Send a ship to the best new star for every idle ship |
@@ -106,7 +119,8 @@ Keys are ignored while you type in a text box, and window keys toggle (press aga
 | Arrows, `+` `-` | Pan (hold `Shift` for faster) and zoom the map, smoothly while held |
 | `←` `→`, digits | In windows: switch tabs; Codex and Menu: `1`…`5` jump to a tab; Corporation → Technology: `1`…`9` start the numbered project |
 | `Enter` | Quests: claim everything that is ready |
-| `1`…`4`, `A`…`D`, `Space`, `R`, `⌫` | Sky School: start a round, answer, next question / another round, review what is due, back |
+| `1`…`5`, `A`…`D`, `Space`, `R`, `⌫` | Sky School: start a round, answer, next question / another round, review what is due, back |
+| `1`…`9` `0`, `Space`, `R`, `P`, `⌫` | Corporation → Academy: practise the numbered topic / everything / what is due; on a study page practise it, or go back |
 
 ## Pace
 
@@ -121,7 +135,7 @@ It is a static site with no build step for the game itself.
 
 ```sh
 npm run serve        # http://localhost:8000
-npm test             # engine tests: data integrity, economy, buildings, tech, events, saves, pacing sketch
+npm test             # engine tests (data, economy, buildings, tech, events, saves, pacing) and Academy tests (every card, every generator checked against an independent calculation, every diagram drawn, levels and perks)
 ```
 
 | File | Purpose |
@@ -129,6 +143,9 @@ npm test             # engine tests: data integrity, economy, buildings, tech, e
 | `js/corp.js` | Corporation data: buildings, technology tree, spectral-class and brightness bonuses, ranks, market conditions. |
 | `js/engine.js` | Pure game logic (no DOM). Costs, rates, fleets, orders, buildings, tech, events, saves. |
 | `js/quiz.js` | Sky School logic (no DOM): question builders, scoring, rewards, spaced repetition. |
+| `js/astro.js` | Olympiad Academy framework (no DOM): topics and perks, the card registry, question builder, mastery and levels. |
+| `js/astro-a.js` `astro-b.js` `astro-c.js` | The Academy's content: facts, diagram cards and numeric generators for the ten topics, with formula sheets. |
+| `js/figs.js` `figs-orbits.js` `figs-stars.js` | Procedural diagrams for the Academy (telescopes, mounts, optics, orbits, the Moon, spectra, H–R diagram, galaxies…). |
 | `js/quests.js` | Quests: story chain and repeatable contracts (progress derived from game state). |
 | `js/pics.js` | Messier pictures: loads `img/messier/` photos, with procedural illustrations as placeholder/fallback. |
 | `img/messier/` | 110 resized Messier photographs (provenance in THIRD_PARTY.md). |

@@ -5,7 +5,7 @@
   "description": "A corporate expansion game on the real night sky.",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test test/engine.test.mjs",
+    "test": "node --test test/engine.test.mjs test/astro.test.mjs",
     "build-data": "node scripts/build-data.mjs",
     "serve": "python3 -m http.server 8000"
   }

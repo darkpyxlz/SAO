@@ -2,9 +2,9 @@
    You run a corporation that colonises the night sky: cash from colonies, research for technology, buildings
    from human technology, trade routes, comets and novae, and a stock price that tracks how you are doing. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./corp.js'));
-  else root.Engine = factory(root.Corp);
-})(typeof self !== 'undefined' ? self : this, function (Corp) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./corp.js'), require('./astro.js'));
+  else root.Engine = factory(root.Corp, root.Astro);
+})(typeof self !== 'undefined' ? self : this, function (Corp, Astro) {
   'use strict';
 
   const { BUILDINGS, BUILDING_MAX, BUILD_LEVEL_MUL, TECHS, TECH_BY_ID, RANKS, MARKETS } = Corp;
@@ -53,7 +53,7 @@
   const ROUTE_MAX = 3;
 
   const PERK_LABEL = {
-    out: v => '+' + pct(v) + ' revenue', speed: v => '−' + pct(v) + ' ship travel time', slots: v => '+' + v + ' fleet slot' + (v === 1 ? '' : 's'),
+    out: v => '+' + pct(v) + ' revenue', speed: v => '−' + pct(v) + ' ship travel time', slots: v => '+' + Math.round(v * 100) / 100 + ' fleet slot' + (v === 1 ? '' : 's'),
     res: v => '+' + pct(v) + ' research', cost: v => '−' + pct(v) + ' costs', cap: v => '+' + pct(v) + ' storage', ev: v => '+' + pct(v) + ' event rewards',
     auto: v => '+' + pct(v) + ' of cash banked automatically', route: v => '+' + pct(v) + ' trade-route strength', star: v => '+' + pct(v) + ' star bonuses',
   };
@@ -120,7 +120,7 @@
         market: blankMarket(),
         stars: {}, fleets: [], orders: [], messier: {}, devConst: {}, masterConst: {}, buildings: {}, routeLvl: {}, quests: { claimed: {}, contracts: [], seq: 0 },
         events: [], eventTimer: rand(CFG.eventFirstDelay), petitions: [], petitionTimer: rand(CFG.petitionGap),
-        notes: {}, quiz: blankQuiz(), log: [], evSeq: 0, petitionSeq: 0, fleetSeq: 0, orderSeq: 0,
+        notes: {}, quiz: blankQuiz(), academy: { lvl: {} }, log: [], evSeq: 0, petitionSeq: 0, fleetSeq: 0, orderSeq: 0,
         stats: blankStats(),
       };
     }
@@ -182,6 +182,7 @@
       S = state;
       if (!S.quiz) S.quiz = blankQuiz();
       S.quiz.astro = S.quiz.astro || {};
+      S.academy = S.academy || { lvl: {} }; S.academy.lvl = S.academy.lvl || {};
       S.buildings = S.buildings || {}; S.routeLvl = S.routeLvl || {};
       S.quests = S.quests || { claimed: {}, contracts: [], seq: 0 };
       S.stats = Object.assign(blankStats(), S.stats);
@@ -214,6 +215,7 @@
         const t = TECH_BY_ID[id];
         if (t) for (const [k, v] of Object.entries(t.perks)) p[k] += v;
       }
+      for (const t of Astro.TOPICS) { const l = S.academy.lvl[t.id] || 0; if (l) p[t.perk.kind] += Astro.perkAt(t.id, l); } // Olympiad Academy levels never go down
       return p;
     }
     function marketMods() {
@@ -904,6 +906,30 @@
       return out.sort((a, b) => (a.why === 'flagship' ? 0 : 1) - (b.why === 'flagship' ? 0 : 1) || b.cash - a.cash || a.star - b.star); // flagships first
     }
 
+    // ---- Olympiad Academy: every topic's mastery (from the spaced-repetition cards) lifts a permanent level that unlocks a bonus
+    function academy() {
+      const store = S.quiz.astro, now = nowFn();
+      return Astro.TOPICS.map(t => {
+        const st = Astro.stats(t.id, store, now), level = S.academy.lvl[t.id] || 0;
+        return { id: t.id, name: t.name, blurb: t.blurb, perk: t.perk, cards: st.n, started: st.started, learned: st.learned, due: st.due, f: st.f, level, next: level < 3 ? Astro.LEVEL_AT[level] : null, perkNow: Astro.perkAt(t.id, level), perkMax: Astro.perkAt(t.id, 3) };
+      });
+    }
+    function academySync() { // raise levels that the cards now justify; returns what was gained
+      const gained = [];
+      for (const t of Astro.TOPICS) {
+        const st = Astro.stats(t.id, S.quiz.astro, nowFn()), have = S.academy.lvl[t.id] || 0;
+        if (st.level > have) {
+          S.academy.lvl[t.id] = st.level;
+          const text = PERK_LABEL[t.perk.kind](Astro.perkAt(t.id, st.level));
+          gained.push({ id: t.id, name: t.name, level: st.level, title: Astro.LEVEL_NAMES[st.level], perk: text });
+          log('Olympiad Academy: ' + t.name + ' reaches level ' + st.level + ' (' + Astro.LEVEL_NAMES[st.level] + '): ' + text + '.', 'rank');
+        }
+      }
+      if (gained.length) recalc();
+      return gained;
+    }
+    const academyLevels = () => Astro.TOPICS.reduce((n, t) => n + (S.academy.lvl[t.id] || 0), 0);
+
     // ---- ordered lists shared by the panels and the keyboard shortcuts, so a key always does what the row it names does
     function expansionTargets(near) { // unclaimed stars a colony ship could be sent to (next to a colony or to a ship's destination), best-paying first
       const pend = targetsPending(), cand = new Set();
@@ -947,6 +973,7 @@
       routeLevel, routeUpgradeCost, canUpgradeRoute, upgradeRoute,
       spawnEvent, redraw, useHint, eventReward, dismissPetition, addPetition,
       consStatus, frontier, attention, expansionTargets, messierTargets, buildOptions, messierStats, lvl, fmt, sepDeg,
+      academy, academySync, academyLevels, Astro,
       serialize() { S.saved = nowFn(); return JSON.stringify(S); },
     };
   }

@@ -210,8 +210,9 @@
   // ---------------------------------------------------------------- pictures and figures
   function drawVisuals(root) {
     root.querySelectorAll('canvas[data-vis]').forEach(cv => {
-      const [t, a, b] = cv.dataset.vis.split(':');
-      if (t === 'figure') Sky.drawChart(cv, G, +a, { big: true, quiz: true });
+      const raw = cv.dataset.vis, k = raw.indexOf(':'), t = raw.slice(0, k), rest = raw.slice(k + 1), [a, b] = rest.split(':');
+      if (t === 'fig') Figs.draw(cv, rest, { labels: cv.dataset.labels === '1' }); // Olympiad Academy diagrams
+      else if (t === 'figure') Sky.drawChart(cv, G, +a, { big: true, quiz: true });
       else if (t === 'marked') Sky.drawChart(cv, G, +a, { big: true, quiz: true, mark: +b });
       else if (t === 'messier') Pics.draw(cv, SKY.messier[+a]);
     });
@@ -555,10 +556,10 @@
       body.innerHTML = h + '</table>';
     },
     learning(body) {
-      const cats = [['const', 'Constellations'], ['star', 'Named stars'], ['messier', 'Messier objects']];
+      const cats = [['const', 'Constellations'], ['star', 'Named stars'], ['messier', 'Messier objects'], ['astro', 'Olympiad Academy']];
       const catF = ui.filter.learnCat || 'all', stF = ui.filter.learnStatus || 'started';
       const all = cats.map(([c, name]) => ({ c, name, items: QZ.items(c) }));
-      let h = '<p class="muted" style="margin-top:0;max-width:700px">Everything you have practised in Sky School. An item is <b class="cyan">learned</b> after ' + QZ.LEARN_BOX + ' correct answers that were each given after their review interval had passed. Items that are <b class="gold">due</b> are ready for their next counting review.</p>';
+      let h = '<p class="muted" style="margin-top:0;max-width:700px">Everything you have practised in Sky School, including the Olympiad Academy’s cards (click one to open its topic). An item is <b class="cyan">learned</b> after ' + QZ.LEARN_BOX + ' correct answers that were each given after their review interval had passed. Items that are <b class="gold">due</b> are ready for their next counting review.</p>';
       let dueTotal = 0;
       h += '<div class="learn-cards">';
       for (const { c, name, items } of all) {
@@ -580,7 +581,7 @@
       else {
         h += '<table class="t"><tr><th>Item</th><th>Progress</th><th>Next review</th><th>Right / wrong</th></tr>';
         for (const x of rows.slice(0, 300)) {
-          const act = x.cat === 'const' ? 'open-const" data-c="' + x.id : x.cat === 'messier' ? 'goto-messier" data-i="' + x.id : 'goto-star" data-i="' + x.id;
+          const act = x.cat === 'astro' ? 'open-academy" data-topic="' + x.topic : x.cat === 'const' ? 'open-const" data-c="' + x.id : x.cat === 'messier' ? 'goto-messier" data-i="' + x.id : 'goto-star" data-i="' + x.id;
           let pips = '<span class="pips ' + (x.status === 'learned' ? 'done' : '') + '">'; for (let k = 0; k < QZ.LEARN_BOX; k++) pips += '<i class="' + (k < x.box ? 'on' : '') + '"></i>'; pips += '</span>';
           const next = x.status === 'learned' ? '<span class="cyan">★ learned</span>' : x.status === 'due' ? '<span class="gold">due now</span>' : x.status === 'learning' ? 'in ' + dur(x.dueMs / 1000) : '<span class="muted">not started</span>';
           h += '<tr class="click" data-act="' + act + '"><td>' + esc(x.name) + '<div class="muted tiny">' + esc(x.sub) + '</div></td><td>' + pips + ' <span class="muted tiny">' + x.box + '/' + QZ.LEARN_BOX + '</span></td><td>' + next + '</td><td class="muted">' + x.ok + ' / ' + x.bad + '</td></tr>';
@@ -654,7 +655,8 @@
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(autosave, 800); }
 
   // ---------------------------------------------------------------- the corporation: overview, technology, buildings
-  const CORP_TABS = [['overview', 'Overview'], ['tech', 'Technology'], ['buildings', 'Buildings']];
+  const CORP_TABS = [['overview', 'Overview'], ['tech', 'Technology'], ['buildings', 'Buildings'], ['academy', 'Academy']];
+  ui.academy = { topic: null };
   function openCorp(tab) { openModal({ id: 'corp', title: 'Corporation', tabs: CORP_TABS, tab: tab || 'overview', renderers: CORP_RENDER, live: true }); }
   function sparkline(cv, hist) {
     const dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth || 300, H = cv.clientHeight || 70;
@@ -724,7 +726,63 @@
       }
       body.innerHTML = h;
     },
+    academy(body) {
+      const info = G.academy(), A = ui.academy;
+      if (A.topic && info.find(t => t.id === A.topic)) { renderAcademyTopic(body, info.find(t => t.id === A.topic)); return; }
+      const pr = QZ.progress('astro'), levels = G.academyLevels();
+      let h = '<p class="muted" style="margin-top:0;max-width:760px">The <b>Olympiad Academy</b> is the astronomy-olympiad syllabus, in ten topics: telescopes and optics, orbital mechanics, light, stars, distances, stellar evolution, planets, galaxies and cosmology. Practise a topic in Sky School and, as its cards pass through the spaced-repetition schedule, the topic climbs through three levels. Every level is a <b>permanent</b> company-wide bonus. Nothing is ever taken back, so the only way to get these upgrades is to really learn the material.</p>';
+      h += '<div class="stat-grid"><div class="stat"><b class="gold">' + levels + ' / ' + info.length * 3 + '</b><span>topic levels</span></div><div class="stat"><b class="cyan">' + pr.learned + ' / ' + pr.total + '</b><span>cards learned</span></div><div class="stat"><b>' + pr.started + '</b><span>cards in progress</span></div><div class="stat"><b class="' + (pr.due ? 'gold' : '') + '">' + pr.due + '</b><span>due for review</span></div></div>';
+      h += '<div class="row" style="margin-bottom:12px"><button class="btn primary" data-act="academy-practise" data-topic="">Practise everything' + kb('Space') + '</button><button class="btn gold" data-act="school-review"' + (pr.due ? '' : ' disabled') + '>Review ' + (pr.due ? pr.due + ' due card' + (pr.due === 1 ? '' : 's') : 'what is due') + kb('R') + '</button></div>';
+      h += '<div class="topics">';
+      info.forEach((t, k) => {
+        const T = Astro.TOPIC_BY_ID[t.id], lad = perkLadder(T, t.level);
+        h += '<div class="topic-card' + (t.level >= 3 ? ' max' : '') + '"><div class="row"><b class="grow">' + esc(t.name) + '</b><span class="badge ' + (t.level ? 'gold' : '') + '">' + esc(Astro.LEVEL_NAMES[t.level]) + '</span></div>';
+        h += '<div class="muted tiny">' + esc(t.blurb) + '</div>';
+        h += '<div class="bar cy mast" title="Mastery ' + Math.round(t.f * 100) + '%"><i style="width:' + Math.min(100, t.f * 100) + '%"></i>' + Astro.LEVEL_AT.map(l => '<u style="left:' + l * 100 + '%"></u>').join('') + '</div>';
+        h += '<div class="row tiny"><span class="pips" title="Levels reached">' + [0, 1, 2].map(l => '<i class="' + (l < t.level ? 'on' : '') + '"></i>').join('') + '</span><span class="muted">' + Math.round(t.f * 100) + '% mastered' + (t.next !== null ? ' · next level at ' + Math.round(t.next * 100) + '%' : ' · complete') + '</span></div>';
+        h += '<div class="tiny perkline">' + lad + '</div>';
+        h += '<div class="row tiny"><span class="muted grow">' + t.learned + ' / ' + t.cards + ' learned' + (t.due ? ' · <b class="gold">' + t.due + ' due</b>' : '') + '</span><button class="btn small primary" data-act="academy-practise" data-topic="' + t.id + '">Practise' + kbRow(k) + '</button><button class="btn small" data-act="academy-topic" data-topic="' + t.id + '">Study</button></div></div>';
+      });
+      h += '</div>';
+      body.innerHTML = h;
+    },
   };
+  function perkLadder(T, level) { // "+4% · +8% · +12% research": the three levels share their wording when they can
+    const texts = T.perk.v.map(v => PERK_TXT(T.perk.kind, v)), tails = texts.map(x => x.slice(x.indexOf(' ') + 1)), same = tails.every(x => x === tails[0]);
+    const heads = same ? texts.map(x => x.slice(0, x.indexOf(' '))) : texts;
+    return heads.map((x, l) => '<span class="' + (l < level ? 'good' : 'muted') + '" title="' + esc(Astro.LEVEL_NAMES[l + 1] + ': ' + Math.round(Astro.LEVEL_AT[l] * 100) + '% mastery') + '">' + (l < level ? '✓ ' : '') + esc(x) + '</span>').join(' · ') + (same ? ' <span class="muted">' + esc(tails[0]) + '</span>' : '');
+  }
+  function renderAcademyTopic(body, t) {
+    const T = Astro.TOPIC_BY_ID[t.id];
+    let h = '<div class="row"><button class="btn small" data-act="academy-back">← Academy' + kb('⌫') + '</button><span class="grow"></span><button class="btn small primary" data-act="academy-practise" data-topic="' + t.id + '">Practise this topic' + kb('P') + '</button></div>';
+    h += '<h2 style="margin:10px 0 2px">' + esc(t.name) + ' <span class="badge ' + (t.level ? 'gold' : '') + '">' + esc(Astro.LEVEL_NAMES[t.level]) + '</span></h2><div class="muted" style="max-width:720px">' + esc(t.blurb) + '</div>';
+    h += '<div class="bar cy mast" style="max-width:560px;margin-top:10px"><i style="width:' + Math.min(100, t.f * 100) + '%"></i>' + Astro.LEVEL_AT.map(l => '<u style="left:' + l * 100 + '%"></u>').join('') + '</div>';
+    h += '<div class="muted tiny" style="max-width:560px">' + Math.round(t.f * 100) + '% mastered · ' + t.learned + ' / ' + t.cards + ' cards learned' + (t.due ? ' · <b class="gold">' + t.due + ' due</b>' : '') + '</div>';
+    h += '<div class="ladder">' + T.perk.v.map((v, l) => '<div class="rung' + (l < t.level ? ' on' : '') + '"><b>' + (l < t.level ? '✓ ' : '') + 'Level ' + (l + 1) + ' · ' + esc(Astro.LEVEL_NAMES[l + 1]) + '</b><span class="tiny muted">at ' + Math.round(Astro.LEVEL_AT[l] * 100) + '% mastery</span><span class="tiny ' + (l < t.level ? 'good' : 'gold') + '">' + esc(PERK_TXT(T.perk.kind, v)) + ' (company-wide)</span></div>').join('') + '</div>';
+    if (T.sheet.length) {
+      h += '<h3>Formula sheet</h3><div class="table-wrap"><table class="t formulas"><tr><th>What</th><th>Formula</th><th></th></tr>';
+      for (const [name, f, note] of T.sheet) h += '<tr><td>' + esc(name) + '</td><td class="formula">' + esc(f) + '</td><td class="muted tiny">' + esc(note || '') + '</td></tr>';
+      h += '</table></div>';
+    }
+    if (T.gallery.length) {
+      h += '<h3>Diagrams</h3>';
+      let group = null;
+      for (const g of T.gallery) {
+        if (g.group !== group) { if (group !== null) h += '</div>'; group = g.group; if (group) h += '<h4 class="figgroup">' + esc(group) + '</h4>'; h += '<div class="figgrid">'; }
+        h += '<div class="figcard"><canvas class="fig" data-vis="fig:' + esc(g.fig) + '" data-labels="1"></canvas><b>' + esc(g.name) + '</b><div class="tiny muted">' + esc(g.note || '') + '</div></div>';
+      }
+      h += '</div>';
+    }
+    const cards = QZ.items('astro').filter(x => x.topic === t.id);
+    h += '<h3>Cards in this topic <span class="muted tiny">' + cards.length + '</span></h3><div class="table-wrap"><table class="t"><tr><th>Card</th><th>Progress</th><th>Next review</th></tr>';
+    for (const x of cards) {
+      let pips = '<span class="pips ' + (x.status === 'learned' ? 'done' : '') + '">'; for (let k = 0; k < QZ.LEARN_BOX; k++) pips += '<i class="' + (k < x.box ? 'on' : '') + '"></i>'; pips += '</span>';
+      const next = x.status === 'learned' ? '<span class="cyan">★ learned</span>' : x.status === 'due' ? '<span class="gold">due now</span>' : x.status === 'learning' ? 'in ' + dur(x.dueMs / 1000) : '<span class="muted">not started</span>';
+      h += '<tr><td>' + esc(x.name) + '<span class="badge tier' + Astro.CARD_BY_ID[x.id].tier + '" title="Difficulty">' + ['basic', 'core', 'advanced'][Astro.CARD_BY_ID[x.id].tier - 1] + '</span></td><td>' + pips + ' <span class="muted tiny">' + x.box + '/' + QZ.LEARN_BOX + '</span></td><td>' + next + '</td></tr>';
+    }
+    body.innerHTML = h + '</table></div>';
+    drawVisuals(body);
+  }
 
   // ---------------------------------------------------------------- quests
   function openQuests() { openModal({ id: 'quests', title: 'Quests', tabs: null, keepScroll: true, render: renderQuests }); }
@@ -758,21 +816,25 @@
     openModal(schoolSpec());
   }
   const LETTERS = ['A', 'B', 'C', 'D'];
+  const SCHOOL_CATS = ['const', 'star', 'messier', 'astro', 'mixed'];
   const intervalText = ms => ms < 3600e3 ? Math.round(ms / 60e3) + ' min' : ms < 86400e3 ? Math.round(ms / 3600e3) + ' h' : Math.round(ms / 86400e3) + ' d';
+  const visSpec = (v, thumb) => v.type === 'fig' ? 'fig:' + v.id : v.type + ':' + (v.type === 'messier' ? v.m : v.c) + (v.type === 'marked' && !thumb ? ':' + v.star : '');
   function renderSchool(body) {
     const sc = ui.school, S = G.state, st = S.quiz.stats;
     if (sc.view === 'menu') {
       const base = QZ.rewardBase();
-      const dueAll = ['const', 'star', 'messier'].reduce((n, c) => n + QZ.progress(c).due, 0);
-      let h = '<p class="muted" style="margin-top:0;max-width:680px">Short rounds of five questions, like staff training for your astronomers. A correct answer pays a little cash and research (about ' + QZ.REWARD.seconds + ' seconds of your revenue, <b>×' + QZ.REWARD.firstTime + '</b> the first time you get something right, with small streak and perfect-round bonuses). It is a side income, not a business plan.</p>' +
+      const dueAll = ['const', 'star', 'messier', 'astro'].reduce((n, c) => n + QZ.progress(c).due, 0);
+      let h = '<p class="muted" style="margin-top:0;max-width:680px">Short rounds of five questions, like staff training for your astronomers: the sky itself, and the <b>Olympiad Academy</b>, which teaches the astronomy-olympiad syllabus for permanent company bonuses. A correct answer pays a little cash and research (about ' + QZ.REWARD.seconds + ' seconds of your revenue, <b>×' + QZ.REWARD.firstTime + '</b> the first time you get something right, with small streak and perfect-round bonuses). It is a side income, not a business plan.</p>' +
         '<div class="callout"><b>Spaced repetition.</b> Nothing is <span class="badge cyan">learned</span> after one lucky answer. Each item needs <b>' + QZ.LEARN_BOX + ' correct answers</b>, and each one only counts once its review is due: ' + QZ.INTERVALS.slice(1, QZ.LEARN_BOX).map(intervalText).join(' → ') + '. Answering early still pays a trickle but doesn’t advance it; a wrong answer sends it back two steps. Items that are due come up most often. See your progress in <span class="link" data-act="open-learning">Codex → Learning</span>.</div>';
       h += '<div class="stat-grid"><div class="stat"><b>' + st.answered + '</b><span>answered</span></div><div class="stat"><b>' + (st.answered ? Math.round(st.correct / st.answered * 100) + '%' : '·') + '</b><span>accuracy</span></div><div class="stat"><b>' + st.bestStreak + '</b><span>best streak</span></div><div class="stat"><b>' + st.perfect + ' / ' + st.rounds + '</b><span>perfect rounds</span></div><div class="stat"><b class="gold">' + money(base.cash) + '</b><span>per correct answer now</span></div></div>';
       if (dueAll) h += '<div class="row" style="margin-bottom:12px"><button class="btn gold" data-act="school-review">Review ' + dueAll + ' due item' + (dueAll === 1 ? '' : 's') + kb('R') + '</button></div>';
       h += '<div class="school-cats">';
-      for (const [ci, cat] of ['const', 'star', 'messier', 'mixed'].entries()) {
+      for (const [ci, cat] of SCHOOL_CATS.entries()) {
         const info = Quiz.CATS[cat], pr = cat === 'mixed' ? null : QZ.progress(cat);
-        h += '<button class="school-cat" data-act="school-start" data-cat="' + cat + '"><b>' + info.name + kb(ci + 1) + '</b><span class="muted">' + info.blurb + '</span>' + (pr ? '<span class="tiny ' + (pr.learned ? 'cyan' : 'muted') + '">learned ' + pr.learned + ' / ' + pr.total + (pr.extra ? ' (+' + pr.extra + ' designations)' : '') + '</span><span class="tiny ' + (pr.due ? 'gold' : 'muted') + '">' + pr.started + ' in progress · ' + pr.due + ' due for review</span>' : '<span class="tiny muted">all three kinds</span>') + '</button>';
+        h += '<button class="school-cat" data-act="school-start" data-cat="' + cat + '"><b>' + info.name + kb(ci + 1) + '</b><span class="muted">' + info.blurb + '</span>' + (pr ? '<span class="tiny ' + (pr.learned ? 'cyan' : 'muted') + '">learned ' + pr.learned + ' / ' + pr.total + (pr.extra ? ' (+' + pr.extra + ' designations)' : '') + '</span><span class="tiny ' + (pr.due ? 'gold' : 'muted') + '">' + pr.started + ' in progress · ' + pr.due + ' due for review</span>' : '<span class="tiny muted">all four kinds</span>') + '</button>';
       }
+      h += '</div><h3>Olympiad Academy topics <span class="muted tiny">practise one topic; each topic you master gives a permanent bonus (Corporation → Academy)</span></h3><div class="filters">';
+      for (const t of G.academy()) h += '<span class="chip' + (t.level ? ' gold' : '') + '" data-act="school-start" data-cat="astro" data-topic="' + t.id + '" title="' + esc(t.blurb) + '">' + esc(t.name) + ' <span class="muted tiny">L' + t.level + (t.due ? ' · ' + t.due + ' due' : '') + '</span></span>';
       body.innerHTML = h + '</div>';
       return;
     }
@@ -783,7 +845,8 @@
       h += '<div class="stat-grid"><div class="stat"><b class="gold">' + money(r.earned.cash + (r.bonus ? r.bonus.cash : 0)) + '</b><span>cash earned</span></div><div class="stat"><b class="cyan">' + rp(r.earned.research + (r.bonus ? r.bonus.research : 0)) + '</b><span>research earned</span></div><div class="stat"><b>' + r.best + '</b><span>best streak</span></div></div>';
       if (r.bonus) h += '<p class="good">Perfect-round bonus included: +' + money(r.bonus.cash) + ' and +' + rp(r.bonus.research) + '.</p>';
       if (sc.learned.length) h += '<p class="cyan">Newly learned: ' + sc.learned.map(esc).join(', ') + '</p>';
-      h += '<div class="row"><button class="btn primary" data-act="school-start" data-cat="' + r.cat + '">Another round' + kb('Space') + '</button><button class="btn" data-act="school-menu">Back to Sky School' + kb('⌫') + '</button></div></div>';
+      for (const g of sc.levels || []) h += '<p class="gold">★ Olympiad Academy: ' + esc(g.name) + ' reached level ' + g.level + ' (' + esc(g.title) + '): ' + esc(g.perk) + ' for the whole company, for good.</p>';
+      h += '<div class="row"><button class="btn primary" data-act="school-start" data-cat="' + r.cat + '"' + (sc.topic ? ' data-topic="' + sc.topic + '"' : '') + '>Another round' + kb('Space') + '</button><button class="btn" data-act="school-menu">Back to Sky School' + kb('⌫') + '</button></div></div>';
       body.innerHTML = h; return;
     }
     const shown = sc.shown;
@@ -791,16 +854,17 @@
     const Q = r.qs[idx];
     if (!Q) { body.innerHTML = '<p class="muted">Sky School could not set a question just now.</p><button class="btn" data-act="school-menu">Back to Sky School</button>'; return; }
     let h = '<div class="row tiny muted"><span>Question ' + (idx + 1) + ' / ' + r.qs.length + '</span><span class="grow"></span><span>streak ' + r.streak + '</span><span class="gold">' + money(r.earned.cash) + '</span><span class="cyan">' + rp(r.earned.research) + '</span></div>';
+    if (Q.topic) h += '<div class="tiny qtopic">Olympiad Academy · ' + esc(Astro.TOPIC_BY_ID[Q.topic].name) + ' · ' + ['basic', 'core', 'advanced'][Astro.CARD_BY_ID[Q.subject.id].tier - 1] + '</div>';
     h += '<h3 class="qprompt">' + esc(Q.prompt) + '</h3>';
     if (Q.quote) h += '<blockquote class="lore">' + esc(Q.quote) + '</blockquote>';
-    if (Q.visual) h += '<canvas class="qvis' + (Q.visual.type === 'messier' ? ' pic' : '') + '" data-vis="' + Q.visual.type + ':' + (Q.visual.type === 'messier' ? Q.visual.m : Q.visual.c) + (Q.visual.type === 'marked' ? ':' + Q.visual.star : '') + '"></canvas>';
+    if (Q.visual) h += '<canvas class="qvis' + (Q.visual.type === 'messier' ? ' pic' : Q.visual.type === 'fig' ? ' fig' : '') + '" data-vis="' + visSpec(Q.visual) + '"></canvas>';
     const visual = Q.options.some(o => o.visual);
     h += '<div class="' + (visual ? 'qgrid' : 'qlist') + '">';
     Q.options.forEach((o, k) => {
       let cls = 'qopt';
       if (shown) cls += k === Q.answer ? ' correct' : k === shown.choice ? ' wrong' : ' dim';
       h += '<button class="' + cls + '" data-act="school-answer" data-i="' + k + '"' + (shown ? ' disabled' : '') + '>';
-      if (o.visual) h += '<canvas class="qthumb' + (o.visual.type === 'messier' ? ' pic' : '') + '" data-vis="' + o.visual.type + ':' + (o.visual.type === 'messier' ? o.visual.m : o.visual.c) + '"></canvas>';
+      if (o.visual) h += '<canvas class="qthumb' + (o.visual.type === 'messier' ? ' pic' : o.visual.type === 'fig' ? ' fig' : '') + '" data-vis="' + visSpec(o.visual, true) + '"></canvas>';
       h += '<span class="ql">' + LETTERS[k] + '</span>' + (visual && !shown ? '' : '<span class="qt">' + esc(o.text) + '</span>');
       h += '</button>';
     });
@@ -822,9 +886,10 @@
     const res = QZ.answer(sc.round, k);
     if (res.learnedNow) {
       const s = q.subject;
-      sc.learned.push(s.cat === 'const' ? SKY.consts[s.id].name : s.cat === 'star' ? SKY.stars[s.id][6] : 'M' + SKY.messier[s.id].n);
+      sc.learned.push(s.cat === 'astro' ? Astro.CARD_BY_ID[s.id].title : s.cat === 'const' ? SKY.consts[s.id].name : s.cat === 'star' ? SKY.stars[s.id][6] : 'M' + SKY.messier[s.id].n);
       toast('Learned: ' + sc.learned[sc.learned.length - 1], 'good');
     }
+    if (res.academy && res.academy.length) (sc.levels = sc.levels || []).push(...res.academy);
     sc.shown = { choice: k, res };
   }
 
@@ -872,7 +937,8 @@
         '<h3>The company</h3><p>As you grow you are promoted from Startup to Cosmic Monopoly. Your share price follows the company’s worth, and random <b>market conditions</b> (booms, tech bubbles, credit crunches, government contracts) come and go while you play.</p>' +
         '<h3>Messier objects</h3><p>Send a <b>survey mission</b> to a Messier object near one of your colonies. Each type gives a bonus (globulars: fleet slots, open clusters: revenue, nebulae: research, galaxies: speed) and is stamped into the catalogue with its photograph.</p>' +
         '<h3>Constellations</h3><p>A <b>developed</b> constellation (every star colonised, 3+ levels each) is stamped in the Codex and unlocks one-tap collection there. <b>Mastered</b> at 9+ levels each.</p>' +
-        '<h3>Sky School</h3><p>Five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, and identify Messier objects by picture and type. Rewards are modest. Everything runs on spaced repetition: an item needs 10 correct answers, spaced further and further apart, before it is <b>learned</b>. Track it all under <b>Codex → Learning</b>.</p>' +
+        '<h3>Sky School</h3><p>Five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, identify Messier objects by photograph, number, name and type, and cover the Olympiad Academy. Rewards are modest. Everything runs on spaced repetition: an item needs 10 correct answers, spaced further and further apart, before it is <b>learned</b>. Track it all under <b>Codex → Learning</b>.</p>' +
+        '<h3>Olympiad Academy</h3><p>The astronomy-olympiad syllabus in ten topics (sky and time, orbital mechanics, telescopes and optics, light, stars, magnitudes and distances, stellar evolution, the Solar System and exoplanets, galaxies and cosmology): facts, <b>diagrams</b> of telescope designs, orbits and the H–R diagram, and numerical problems with fresh numbers every time. Practise in Sky School; open <b>Corporation → Academy</b> for each topic’s level, formula sheet and diagrams. Mastering a topic raises it through three levels, and every level is a <b>permanent</b> bonus for the whole company.</p>' +
         '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a long <b>story</b> chain. Rewards are worth minutes of your revenue.</p>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
         '<h3>Petitions</h3><p>Colonies sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. Nothing in this game dims, decays or is taken from you.</p>' +
@@ -913,7 +979,11 @@
       for (const q of L.contracts.concat(L.story)) if (q.done) { const r = QU.claim(q.id); if (r.ok) { cash += r.reward.cash; res += r.reward.research; n++; } }
       toast(n ? 'Claimed ' + plural(n, 'quest') + ': +' + money(cash) + '  +' + rp(res) : 'Nothing to claim yet.', n ? 'gold' : 'bad');
     },
-    'school-start': el => { ui.school = { view: 'q', round: QZ.startRound(el.dataset.cat), shown: null, learned: [] }; if (!ui.modal || ui.modal.id !== 'school') openModal(schoolSpec()); },
+    'school-start': el => { const topic = el.dataset.topic || null; ui.school = { view: 'q', round: QZ.startRound(el.dataset.cat, QZ.ROUND_LENGTH, { topic }), topic, shown: null, learned: [], levels: [] }; if (!ui.modal || ui.modal.id !== 'school') openModal(schoolSpec()); },
+    'academy-practise': el => runAct('school-start', { cat: 'astro', topic: el.dataset.topic || '' }),
+    'open-academy': el => { ui.academy.topic = el.dataset.topic || null; openCorp('academy'); },
+    'academy-topic': el => { ui.academy.topic = el.dataset.topic; const b = $('#modal-body'); if (b) b.scrollTop = 0; },
+    'academy-back': () => { ui.academy.topic = null; const b = $('#modal-body'); if (b) b.scrollTop = 0; },
     'school-review': () => startReview(),
     'school-answer': el => schoolAnswer(+el.dataset.i),
     'school-next': () => { const sc = ui.school; sc.shown = null; if (sc.round.done) sc.view = 'summary'; },
@@ -948,7 +1018,7 @@
     'reset': () => { if (confirm('Wind up this company and start again? Export first if you want a backup.')) { ui.started = false; /* stops the unload autosave from writing the old game back */ try { localStorage.removeItem(AUTOSAVE); } catch (e) { } closeModal(); location.reload(); } },
   };
   // after these actions the modal swaps itself, so it must not be re-rendered again by the click handler
-  const NO_RERENDER = ['open-const', 'tab', 'filter', 'goto-star', 'goto-messier', 'goto-const', 'close-modal', 'open-codex', 'open-menu', 'open-corp', 'open-corp-tech', 'open-learning', 'open-school', 'open-quests', 'open-fleets', 'school-review', 'slot-load', 'reset'];
+  const NO_RERENDER = ['open-academy', 'academy-practise', 'open-const', 'tab', 'filter', 'goto-star', 'goto-messier', 'goto-const', 'close-modal', 'open-codex', 'open-menu', 'open-corp', 'open-corp-tech', 'open-learning', 'open-school', 'open-quests', 'open-fleets', 'school-review', 'slot-load', 'reset'];
   function afterAct(name) {
     if (!ui.started) return;
     scheduleSave(); renderHud(); renderPanel();
@@ -977,6 +1047,7 @@
       [['O'], 'Corporation overview'],
       [['T'], 'Technology tree'],
       [['B'], 'Buildings catalogue'],
+      [['A'], 'Olympiad Academy: topics, levels and study pages'],
       [['F'], 'Fleets and queued charters'],
       [['?'], 'This list'],
       [['Esc'], 'Close the window, finish redrawing, or deselect. With nothing to close it opens the menu'],
@@ -1006,9 +1077,10 @@
       [['←', '→'], 'Switch tabs'],
       [['1', '…', '5'], 'Codex and Menu: jump to a tab'],
       [['1', '…', '9'], 'Corporation → Technology: start the numbered project'],
+      [['1', '…', '9', '0'], 'Corporation → Academy: practise the numbered topic (Space: everything, R: what is due, ⌫ leaves a study page, P practises it)'],
       [['R'], 'Codex → Learning, and the Sky School menu: review what is due'],
       [['Enter'], 'Quests: claim everything that is ready'],
-      [['1', '…', '4'], 'Sky School menu: start a round. In a question: answer (A–D work too)'],
+      [['1', '…', '5'], 'Sky School menu: start a round. In a question: answer (1–4 or A–D)'],
       [['Space'], 'Sky School: next question, or another round'],
       [['⌫'], 'Sky School results, and a constellation page: back'],
     ]],
@@ -1083,6 +1155,7 @@
       case 'o': toggleCorp('overview'); return true;
       case 't': toggleCorp('tech'); return true;
       case 'b': toggleCorp('buildings'); return true;
+      case 'a': ui.academy.topic = null; toggleCorp('academy'); return true;
       case 'f': toggleModal('fleets', openFleets); return true;
       case '?': case '/': toggleMenu('keys'); return true;
     }
@@ -1100,12 +1173,12 @@
   function schoolKey(key, d) {
     const sc = ui.school;
     if (sc.view === 'menu') {
-      if (d >= 1 && d <= 4) { runAct('school-start', { cat: ['const', 'star', 'messier', 'mixed'][d - 1] }); return true; }
-      if (key === 'r' && ['const', 'star', 'messier'].some(c => QZ.progress(c).due)) { runAct('school-review'); return true; }
+      if (d >= 1 && d <= SCHOOL_CATS.length) { runAct('school-start', { cat: SCHOOL_CATS[d - 1] }); return true; }
+      if (key === 'r' && ['const', 'star', 'messier', 'astro'].some(c => QZ.progress(c).due)) { runAct('school-review'); return true; }
       return false;
     }
     if (sc.view === 'summary') {
-      if (key === ' ' || key === 'Enter') { runAct('school-start', { cat: sc.round.cat }); return true; }
+      if (key === ' ' || key === 'Enter') { runAct('school-start', { cat: sc.round.cat, topic: sc.topic || '' }); return true; }
       if (key === 'Backspace' || key === 'ArrowLeft') { runAct('school-menu'); return true; }
       return false;
     }
@@ -1124,13 +1197,25 @@
     if (m.id === 'const') { if (key === 'ArrowLeft' || key === 'Backspace') { openCodex(); return true; } return false; }
     if (m.tabs && m.tabs.length) {
       if (key === 'ArrowLeft' || key === 'ArrowRight') { shiftTab(key === 'ArrowRight' ? 1 : -1); return true; }
+      if (m.id === 'corp' && ui.tab === 'academy') {
+        const A = ui.academy;
+        if (A.topic) { // a topic's study page
+          if (key === 'Backspace') { runAct('academy-back'); return true; }
+          if (key === 'p' || key === ' ' || key === 'Enter') { runAct('academy-practise', { topic: A.topic }); return true; }
+        } else {
+          if (d >= 0) { const t = Astro.TOPICS[rowOf(d)]; if (t) runAct('academy-practise', { topic: t.id }); else toast('There are ' + Astro.TOPICS.length + ' topics (1–9 and 0).', 'bad'); return true; }
+          if (key === ' ' || key === 'Enter') { runAct('academy-practise', { topic: '' }); return true; }
+          if (key === 'r') { if (QZ.progress('astro').due || ['const', 'star', 'messier'].some(c => QZ.progress(c).due)) runAct('school-review'); else toast('Nothing is due for review right now.', 'bad'); return true; }
+        }
+        return false;
+      }
       if (m.id === 'corp' && ui.tab === 'tech' && d >= 0) {
         const t = G.TECHS.filter(x => G.techStatus(x.id) === 'available')[rowOf(d)];
         if (t) runAct('start-tech', { id: t.id }); else toast('No research project has that number.', 'bad');
         return true;
       }
       if (m.id === 'codex' && ui.tab === 'learning' && key === 'r') {
-        if (['const', 'star', 'messier'].some(c => QZ.progress(c).due)) runAct('school-review'); else toast('Nothing is due for review right now.', 'bad');
+        if (['const', 'star', 'messier', 'astro'].some(c => QZ.progress(c).due)) runAct('school-review'); else toast('Nothing is due for review right now.', 'bad');
         return true;
       }
       if ((m.id === 'codex' || m.id === 'menu') && d >= 1 && d <= m.tabs.length) { selectTab(d - 1); return true; }
@@ -1234,7 +1319,7 @@
       if (sec > 1) {
         sec = 0; renderAttention();
         const typing = document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName);
-        if (ui.modal && (ui.modal.live || (ui.modal.tabs && ui.tab === 'chron')) && !typing && !$('#modal-body :active')) renderModal();
+        if (ui.modal && ((ui.modal.live && !(ui.modal.id === 'corp' && ui.tab === 'academy')) || (ui.modal.tabs && ui.tab === 'chron')) && !typing && !$('#modal-body :active')) renderModal();
       }
       pumpLog();
     } else sky.render(now, { sel: null, redraw: null, flashes: [], frontier: new Set(), hint: false, _idle: true });

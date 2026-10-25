@@ -218,7 +218,7 @@ function checkQuestion(q) {
   const texts = q.options.map(o => o.text);
   assert.equal(new Set(texts).size, texts.length, q.kind + ' duplicate options: ' + texts.join('|') + ' / ' + q.prompt);
   texts.forEach(t => assert.ok(t && t.length, q.kind + ' empty option'));
-  if (q.visual) assert.ok(['figure', 'marked', 'messier'].includes(q.visual.type));
+  if (q.visual) assert.ok(['figure', 'marked', 'messier', 'fig'].includes(q.visual.type));
   if (q.kind === 'const-pick' || q.kind === 'm-type-pic') q.options.forEach(o => assert.ok(o.visual, q.kind + ' option visual'));
   assert.ok(q.explain && q.explain.length > 10);
   if (q.kind === 'const-lore') assert.ok(!q.quote.toLowerCase().startsWith(SKY.consts[q.subject.id].name.toLowerCase()), 'lore masks the name');
@@ -232,7 +232,7 @@ test('quiz: every question kind builds valid, unambiguous questions', () => {
   const QZ = Quiz.create(G, { rng: seeded(5), now: () => 1e12 });
   const seenKinds = new Set();
   for (let n = 0; n < 150; n++) {
-    for (const cat of ['const', 'star', 'messier', 'mixed']) {
+    for (const cat of ['const', 'star', 'messier', 'astro', 'mixed']) {
       const r = QZ.startRound(cat);
       assert.equal(r.qs.length, 5, cat + ' round length');
       r.qs.forEach(q => { checkQuestion(q); seenKinds.add(q.kind); });
@@ -240,7 +240,8 @@ test('quiz: every question kind builds valid, unambiguous questions', () => {
       assert.equal(new Set(subjects).size, subjects.length, 'no repeated subject in a round');
     }
   }
-  for (const kinds of Object.values(Quiz.create(G).KINDS)) kinds.forEach(k => assert.ok(seenKinds.has(k), 'kind generated: ' + k));
+  for (const [cat, kinds] of Object.entries(Quiz.create(G).KINDS)) if (cat !== 'astro') kinds.forEach(k => assert.ok(seenKinds.has(k), 'kind generated: ' + k));
+  ['astro-fact', 'astro-calc', 'astro-fig'].forEach(k => assert.ok(seenKinds.has(k), 'Academy kind generated: ' + k));
 });
 
 test('quiz: spaced repetition needs 10 spaced correct answers; early answers do not count', () => {

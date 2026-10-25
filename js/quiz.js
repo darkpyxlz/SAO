@@ -1,9 +1,9 @@
-/* Sky School: quiz logic (no DOM). Builds questions about constellations, stars and Messier objects,
-   scores answers, pays rewards and tracks what the player has learned. */
+/* Sky School: quiz logic (no DOM). Builds questions about constellations, stars, Messier objects and the Olympiad Academy's
+   astronomy syllabus, scores answers, pays rewards and tracks what the player has learned. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.Quiz = factory();
-})(typeof self !== 'undefined' ? self : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./astro.js'));
+  else root.Quiz = factory(root.Astro);
+})(typeof self !== 'undefined' ? self : this, function (Astro) {
   'use strict';
 
   const ROUND_LENGTH = 5;
@@ -20,6 +20,7 @@
     const: { name: 'Constellations', blurb: 'Recognise figures, borders and myths.' },
     star: { name: 'Stars', blurb: 'Name stars, colours and brightness.' },
     messier: { name: 'Messier objects', blurb: 'Tell clusters, nebulae and galaxies apart.' },
+    astro: { name: 'Olympiad Academy', blurb: 'Telescopes, orbits, light, stars and cosmology: the astronomy olympiad syllabus.' },
     mixed: { name: 'Mixed round', blurb: 'A bit of everything.' },
   };
 
@@ -65,6 +66,9 @@
     const wStar = i => (isNamed(i) ? 3 : G.state.stars[i] ? 1.5 : 0.0001) * priority('star', i);
     const wMessier = m => (G.state.messier[m] ? 3 : 1) * priority('messier', m);
     const allConst = [...Array(NC).keys()], allMessier = [...Array(NM).keys()];
+    const astroIds = Astro.CARDS.map(c => c.id);
+    let astroTopic = null; // a round can be limited to one Academy topic
+    const wAstro = id => { const c = Astro.CARD_BY_ID[id], seen = rec('astro', id); return priority('astro', id) * (seen ? 1 : [1, 0.7, 0.45][c.tier - 1]); }; // basics first
     const starPool = () => SKY.stars.map((s, i) => i).filter(i => isNamed(i) || G.state.stars[i]);
 
     function constDistractors(c, k, avoid) {
@@ -211,6 +215,10 @@
         const q = { kind: 'm-name-pic', cat: 'messier', subject: { cat: 'messier', id: m }, prompt: 'Which picture shows the ' + M.alt + '?', visual: null };
         return finish(q, opt(M.alt + ' (M' + M.n + ')', { type: 'messier', m }), lookalikes(m, 3, true).map(x => opt(SKY.messier[x].alt + ' (M' + SKY.messier[x].n + ')', { type: 'messier', m: x })));
       },
+      astro() {
+        const id = sample(astroTopic ? Astro.IDS_BY_TOPIC[astroTopic] : astroIds, 1, wAstro)[0];
+        return id === undefined ? null : Astro.makeQuestion(id, rng);
+      },
       'm-alt-num'() {
         const withAlt = allMessier.filter(m => SKY.messier[m].alt);
         const m = sample(withAlt, 1, wMessier)[0];
@@ -224,6 +232,7 @@
       const: ['const-figure', 'const-pick', 'const-lore', 'const-neighbour'],
       star: ['star-marked', 'star-colour', 'star-brighter', 'star-const'],
       messier: ['m-pic-type', 'm-pic-num', 'm-pic-name', 'm-num-pic', 'm-name-pic', 'm-type-pic', 'm-name-type', 'm-const', 'm-alt-num'],
+      astro: ['astro'],
     };
 
     function explain(q) {
@@ -245,7 +254,7 @@
         if (!q) continue;
         const key = q.subject.cat + ':' + q.subject.id;
         if (avoidKeys && avoidKeys.has(key)) continue;
-        q.explain = explain(q);
+        if (!q.explain) q.explain = explain(q);
         return q;
       }
       return null;
@@ -254,11 +263,11 @@
     // ---- rounds
     function startRound(cat, length, o) {
       length = length || ROUND_LENGTH;
-      focusDue = !!(o && o.dueOnly);
-      try { return buildRound(cat, length); } finally { focusDue = false; }
+      focusDue = !!(o && o.dueOnly); astroTopic = (o && o.topic) || null;
+      try { return buildRound(cat, length); } finally { focusDue = false; astroTopic = null; }
     }
     function buildRound(cat, length) {
-      const order = cat === 'mixed' ? ['const', 'star', 'messier'] : [cat];
+      const order = cat === 'mixed' ? ['const', 'star', 'messier', 'astro'] : [cat];
       const qs = [], seen = new Set();
       for (let i = 0; i < length; i++) {
         const c = cat === 'mixed' ? shuffle(order)[0] : cat;
@@ -309,7 +318,8 @@
         r.box = Math.max(0, r.box - 2); r.due = now() + INTERVALS[r.box]; // come back to it soon
       }
       round.answers.push({ choice, correct });
-      const res = { correct, answer: q.answer, explain: q.explain, reward, counted, learnedNow, box: r.box, learnedBox: LEARN_BOX, nextReviewMs: Math.max(0, r.due - now()), last: round.i === round.qs.length - 1 };
+      const academy = q.subject.cat === 'astro' ? G.academySync() : []; // a topic may have just reached a new level
+      const res = { correct, answer: q.answer, explain: q.explain, reward, counted, learnedNow, academy, box: r.box, learnedBox: LEARN_BOX, nextReviewMs: Math.max(0, r.due - now()), last: round.i === round.qs.length - 1 };
       round.i++;
       if (res.last) {
         round.done = true; st.rounds++;
@@ -327,7 +337,7 @@
     function isDue(cat, id) { const r = Q()[cat][id]; return !!r && !r.learned && now() >= (r.due || 0); }
     function progress(cat) {
       const store = Q()[cat];
-      const ids = cat === 'const' ? allConst : cat === 'messier' ? allMessier : named;
+      const ids = cat === 'const' ? allConst : cat === 'messier' ? allMessier : cat === 'astro' ? astroIds : named;
       const out = { learned: ids.filter(i => learned(cat, i)).length, total: ids.length, started: ids.filter(i => store[i]).length, due: ids.filter(i => isDue(cat, i)).length };
       if (cat === 'star') { out.extra = Object.keys(store).filter(k => !isNamed(+k) && learned('star', +k)).length; out.due += Object.keys(store).filter(k => !isNamed(+k) && isDue('star', +k)).length; }
       return out;
@@ -335,17 +345,17 @@
     // Everything the player could be learning, with spaced-repetition progress, for the codex Learning tab.
     function items(cat) {
       const store = Q()[cat];
-      const ids = cat === 'const' ? allConst : cat === 'messier' ? allMessier : named.concat(Object.keys(store).map(Number).filter(i => !isNamed(i)));
+      const ids = cat === 'const' ? allConst : cat === 'messier' ? allMessier : cat === 'astro' ? astroIds : named.concat(Object.keys(store).map(Number).filter(i => !isNamed(i)));
       return ids.map(id => {
         const r = store[id];
-        const name = cat === 'const' ? SKY.consts[id].name : cat === 'messier' ? 'M' + SKY.messier[id].n + (SKY.messier[id].alt ? ' ' + SKY.messier[id].alt : '') : label(id);
-        const sub = cat === 'const' ? SKY.consts[id].en : cat === 'messier' ? SKY.messier[id].tname : SKY.consts[SKY.stars[id][5]].name;
+        const name = cat === 'astro' ? Astro.CARD_BY_ID[id].title : cat === 'const' ? SKY.consts[id].name : cat === 'messier' ? 'M' + SKY.messier[id].n + (SKY.messier[id].alt ? ' ' + SKY.messier[id].alt : '') : label(id);
+        const sub = cat === 'astro' ? Astro.TOPIC_BY_ID[Astro.CARD_BY_ID[id].topic].name : cat === 'const' ? SKY.consts[id].en : cat === 'messier' ? SKY.messier[id].tname : SKY.consts[SKY.stars[id][5]].name;
         const status = !r ? 'new' : r.learned ? 'learned' : now() >= (r.due || 0) ? 'due' : 'learning';
         return { cat, id, name, sub, box: r ? r.box || 0 : 0, ok: r ? r.ok : 0, bad: r ? r.bad : 0, dueMs: r && !r.learned ? Math.max(0, (r.due || 0) - now()) : 0, status };
       });
     }
-    function learnedTotal() { return ['const', 'star', 'messier'].reduce((n, c) => n + Object.values(Q()[c]).filter(r => r.learned).length, 0); }
-    return { ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS, KINDS, build: kind => { const q = BUILD[kind](); if (q) q.explain = explain(q); return q; }, question, startRound, answer, learned, boxOf, isDue, progress, items, learnedTotal, rewardBase, typeNames, named };
+    function learnedTotal() { return ['const', 'star', 'messier', 'astro'].reduce((n, c) => n + Object.values(Q()[c]).filter(r => r.learned).length, 0); }
+    return { ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS, KINDS, build: kind => { const q = BUILD[kind](); if (q && !q.explain) q.explain = explain(q); return q; }, topicCards: id => Astro.IDS_BY_TOPIC[id], question, startRound, answer, learned, boxOf, isDue, progress, items, learnedTotal, rewardBase, typeNames, named };
   }
   return { create, ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS };
 });

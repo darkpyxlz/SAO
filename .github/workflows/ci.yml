@@ -13,6 +13,6 @@ jobs:
         with:
           node-version: 22
       - name: Syntax check
-        run: for f in js/corp.js js/engine.js js/quiz.js js/quests.js js/pics.js js/sky.js js/ui.js scripts/build-data.mjs; do node --check "$f"; done
-      - name: Engine tests (data integrity, economy, events, saves)
+        run: for f in js/corp.js js/astro-a.js js/astro-b.js js/astro-c.js js/astro.js js/engine.js js/quiz.js js/quests.js js/pics.js js/figs.js js/figs-orbits.js js/figs-stars.js js/sky.js js/ui.js scripts/build-data.mjs; do node --check "$f"; done
+      - name: Tests (data integrity, economy, events, saves, the Olympiad Academy)
         run: npm test
