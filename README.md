@@ -2,10 +2,16 @@
 
 An incremental empire game on the real night sky. Play it in the browser: **https://darkpyxlz.github.io/SAO/**
 
-Start on one star and slowly spread across the whole celestial sphere. Every star on the 88 constellation
-stick figures is a node (757 of them, with their real positions, brightness and colour). The figure lines
-are your trade routes; short "hyperlanes" join neighbouring constellations. All 110 Messier objects are
-special sites. It is a solo, PvE game with no decay: nothing is ever taken from you.
+Start on one star and slowly spread across the whole celestial sphere. The sky is **one flat map** that you
+drag to pan, scroll or pinch to zoom, and that wraps around from 24h back to 0h without a seam (Miller
+cylindrical projection, with a faint graticule and the ecliptic). Every star on the 88 constellation stick
+figures is a node (757 of them, with their real positions, brightness and colour). The figure lines are your
+trade routes; short "hyperlanes" join neighbouring constellations. All 110 Messier objects are special sites.
+It is a solo, PvE game with no decay: nothing is ever taken from you, and no star has special powers.
+
+Only the important stars carry proper names (Sirius, Betelgeuse, Polaris, Algol…, 54 of them). Every other
+star is shown by its official designation: Bayer letter (β Ori), Flamsteed number (61 Cyg), variable-star
+name, or HD / HIP catalogue number.
 
 ## How it plays
 
@@ -19,9 +25,6 @@ special sites. It is a solo, PvE game with no decay: nothing is ever taken from 
 - **Messier objects** need a claimed star nearby plus Insight. Each type gives a bonus (globulars: fleet
   slots, open clusters: Starlight, nebulae: Insight, galaxies: speed) and is stamped into the Messier
   catalogue. Study one in depth to double its bonus.
-- **Wonders**: famous named stars (Sirius, Canopus, Betelgeuse, Algol, Mira…) with a unique power; claim for
-  half power, run an Observatory project for the rest. Sets such as the Royal Stars or the Summer Triangle
-  give bonuses too.
 - **Developed constellations**: claim every star and upgrade each to ≥3 levels. It is stamped in the Codex
   (with a page per constellation: chart, lore, stars, neighbours, your own notes) and unlocks one-tap
   collection. **Mastered** at ≥9 levels each.
@@ -45,7 +48,7 @@ npm test             # engine tests: data integrity, economy pacing sketch, even
 | File | Purpose |
 |---|---|
 | `js/engine.js` | Pure game logic (no DOM). Costs, rates, fleets, orders, events, wonders, saves. |
-| `js/sky.js` | Stereographic canvas renderer, pan/zoom/pick, codex mini-charts. |
+| `js/sky.js` | Flat wrapping map renderer (Miller projection), pan/zoom/pick, codex mini-charts. |
 | `js/ui.js` | Start screen, HUD, panels, Codex, redraw mode, saves, main loop. |
 | `js/data.js` | Generated sky data (do not edit by hand). |
 | `data/lore.json` | Constellation and Messier text, Messier→constellation table. |
@@ -55,7 +58,8 @@ To regenerate the data: `npm pack d3-celestial`, unpack it, then
 `node scripts/build-data.mjs <package>/data`.
 
 Tuning constants live in `CFG` at the top of `js/engine.js`. The test file includes a small bot that plays
-30 days at three visits a day, to sanity-check pacing after changes.
+30 days at three visits a day, to sanity-check pacing after changes. (Roughly: a casual player at three
+visits a day claims every star in about two months; once a day takes around five or six.)
 
 ## Publishing
 

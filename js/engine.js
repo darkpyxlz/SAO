@@ -6,12 +6,12 @@
   'use strict';
 
   const RAD = Math.PI / 180;
-  const SAVE_VERSION = 1;
+  const SAVE_VERSION = 2;
   const TRACKS = ['r', 'b', 'o'];
   const TRACK_INFO = {
     r: { name: 'Radiance', short: 'Rad', desc: 'More Starlight from this star.', base: 50, grow: 2.0 },
     b: { name: 'Beacon', short: 'Bea', desc: 'Faster fleets from here, stronger trade routes, more fleet slots.', base: 80, grow: 2.1 },
-    o: { name: 'Observatory', short: 'Obs', desc: 'Gathers Insight, used for Messier expeditions and wonders.', base: 120, grow: 2.2 },
+    o: { name: 'Observatory', short: 'Obs', desc: 'Gathers Insight, used for Messier expeditions.', base: 120, grow: 2.2 },
   };
   const MAX_LEVEL = 5;
   const CLASS_NAMES = ['Blue-white', 'Yellow', 'Orange-red'];
@@ -21,87 +21,27 @@
   const MASTER_LEVELS = 9; // ... and for a "mastered" one
 
   const CFG = {
-    startStarlight: 100,
-    secPerDeg: 15,
+    startStarlight: 100, baseOutput: 0.065,
+    secPerDeg: 10,
     messierTravelMul: 1.5,
     baseSlots: 3,
-    claimBase: 25, claimScale: 40, claimPow: 1.7, claimRamp: 14,
+    claimBase: 25, claimScale: 34, claimPow: 1.7, claimRamp: 14,
     upgradeSize: 0.03,
     messierInsightBase: 30, messierInsightStep: 6,
     messierStarlightFrac: 0.5,
     developMessierBase: 80, developMessierStep: 4,
-    wonderInsight: 120, wonderStarlightMul: 40, wonderSeconds: 7200,
     routeBonusComp: 0.12, routeBonusSame: 0.05, routeBeaconMul: 0.25,
     beaconSpeed: 0.07, speedFloor: 0.25,
     insightPerObs: 0.004,
     devBonus: 0.015, masterBonus: 0.025,
-    eventMinRoutes: 8, eventFirstDelay: [400, 900], eventGap: [1500, 3000],
+    eventMinRoutes: 8, eventFirstDelay: [400, 900], eventGap: [1200, 2400],
     cometSeconds: 900, novaSeconds: 1500,
     redrawBase: 60, redrawPerStar: 6,
-    petitionGap: [900, 1800], petitionMax: 3, orderMax: 12,
+    petitionGap: [600, 1200], petitionMax: 3, orderMax: 12,
     maxOfflineSeconds: 60 * 86400,
     logMax: 250,
   };
 
-  // Named-star wonders. out: global Starlight, speed: fleet travel, slots: fleet slots, ins: Insight,
-  // cost: cheaper claims/upgrades, cap: bigger stockpiles, ev: bigger event rewards.
-  const WONDERS = {
-    'Sirius': ['out', 0.12, 'The Dog Star burns brightest of all.'],
-    'Canopus': ['speed', 0.12, 'A navigator’s beacon for the southern seas.'],
-    'Arcturus': ['slots', 1, 'The Bear Watcher shepherds extra fleets.'],
-    'Toliman': ['speed', 0.06, 'Nearest neighbour of the Sun: a short hop to everywhere.'],
-    'Vega': ['ins', 0.12, 'Once and future pole star, a keen eye for discoveries.'],
-    'Capella': ['out', 0.08, 'A golden binary giant of the Charioteer.'],
-    'Rigel': ['out', 0.10, 'A blue supergiant blazing at Orion’s foot.'],
-    'Procyon': ['cost', 0.06, 'Quiet, efficient, and close to home.'],
-    'Betelgeuse': ['ev', 0.25, 'Unstable giant. Events pay out far more handsomely.'],
-    'Achernar': ['speed', 0.08, 'The river’s end, a far southern anchor.'],
-    'Hadar': ['cap', 0.15, 'Larger stockpiles at the Centaur’s heel.'],
-    'Altair': ['speed', 0.04, 'The swift Eagle spins once in nine hours.'],
-    'Acrux': ['ins', 0.08, 'Foot of the Southern Cross.'],
-    'Aldebaran': ['out', 0.06, 'The Bull’s red eye, one of the four Royal Stars.'],
-    'Spica': ['cap', 0.12, 'The harvest star of Virgo.'],
-    'Antares': ['out', 0.08, 'Rival of Mars, heart of the Scorpion, a Royal Star.'],
-    'Pollux': ['cost', 0.05, 'The immortal twin.'],
-    'Castor': ['cost', 0.05, 'The mortal twin, itself a six-star system.'],
-    'Fomalhaut': ['out', 0.06, 'The lonely Royal Star of the autumn sky.'],
-    'Mimosa': ['ins', 0.06, 'Blue-white jewel of the Southern Cross.'],
-    'Deneb': ['speed', 0.10, 'A distant, luminous tail of the Swan.'],
-    'Gacrux': ['ins', 0.05, 'Head of the Southern Cross.'],
-    'Regulus': ['out', 0.06, 'Heart of the Lion, a Royal Star.'],
-    'Polaris': ['cap', 0.20, 'The still point of the turning sky.'],
-    'Algol': ['ev', 0.30, 'The Demon Star winks every 2.87 days.'],
-    'Mira': ['ins', 0.10, 'The Wonderful One swells and fades over eleven months.'],
-    'Thuban': ['out', 0.05, 'Pole star of the pyramid builders.'],
-    'Mizar': ['cost', 0.04, 'Famous naked-eye double with Alcor.'],
-    'Bellatrix': ['out', 0.03, 'The Amazon Star.'],
-    'Alnitak': ['out', 0.03, 'Eastern belt star of Orion.'],
-    'Alnilam': ['out', 0.03, 'Central belt star of Orion.'],
-    'Mintaka': ['out', 0.03, 'Western belt star of Orion.'],
-    'Saiph': ['out', 0.03, 'The sword of the Hunter.'],
-    'Dubhe': ['cost', 0.03, 'A Pointer to the North Star.'],
-    'Merak': ['cost', 0.03, 'A Pointer to the North Star.'],
-    'Albireo': ['ins', 0.05, 'Gold and blue double at the Swan’s beak.'],
-    'Sadr': ['out', 0.03, 'Heart of the Northern Cross.'],
-    'Shaula': ['out', 0.04, 'The Scorpion’s stinger.'],
-    'Alphard': ['cap', 0.08, 'The solitary one of Hydra.'],
-    'Denebola': ['out', 0.03, 'The Lion’s tail.'],
-    'Mirfak': ['ev', 0.10, 'Bright heart of the Perseus stream.'],
-    'Hamal': ['cost', 0.03, 'Brightest star of the Ram.'],
-    'Alpheratz': ['speed', 0.04, 'Where Andromeda meets Pegasus.'],
-    'Kochab': ['cap', 0.06, 'Guardian of the Pole.'],
-    'Eltanin': ['speed', 0.04, 'The Dragon’s eye.'],
-    'Rasalhague': ['ins', 0.04, 'Head of the Serpent-Bearer.'],
-  };
-  const WONDER_SETS = [
-    { id: 'royal', name: 'Royal Stars', stars: ['Aldebaran', 'Regulus', 'Antares', 'Fomalhaut'], perk: ['out', 0.12] },
-    { id: 'summer', name: 'Summer Triangle', stars: ['Vega', 'Deneb', 'Altair'], perk: ['speed', 0.08] },
-    { id: 'winter', name: 'Winter Hexagon', stars: ['Sirius', 'Procyon', 'Pollux', 'Capella', 'Aldebaran', 'Rigel'], perk: ['cost', 0.08] },
-    { id: 'belt', name: 'Orion’s Belt', stars: ['Alnitak', 'Alnilam', 'Mintaka'], perk: ['slots', 1] },
-    { id: 'cross', name: 'Southern Cross', stars: ['Acrux', 'Mimosa', 'Gacrux'], perk: ['ins', 0.12] },
-    { id: 'pointers', name: 'The Pointers', stars: ['Dubhe', 'Merak'], perk: ['cap', 0.10] },
-    { id: 'twins', name: 'The Twins', stars: ['Castor', 'Pollux'], perk: ['out', 0.04] },
-  ];
   const PERK_LABEL = {
     out: v => '+' + pct(v) + ' Starlight', speed: v => '−' + pct(v) + ' fleet travel time', slots: v => '+' + v + ' fleet slot' + (v === 1 ? '' : 's'),
     ins: v => '+' + pct(v) + ' Insight', cost: v => '−' + pct(v) + ' costs', cap: v => '+' + pct(v) + ' stockpile size', ev: v => '+' + pct(v) + ' event rewards',
@@ -134,15 +74,8 @@
     SKY.edges.forEach((e, i) => { adj[e[0]].push({ to: e[1], e: i }); adj[e[1]].push({ to: e[0], e: i }); edgeIdx.set(key(e[0], e[1]), i); });
     const edgeLen = SKY.edges.map(e => sepDeg(SKY.stars[e[0]], SKY.stars[e[1]]));
     const cls = SKY.stars.map(s => (s[4] < 0.3 ? 0 : s[4] < 0.8 ? 1 : 2));
-    const baseRate = SKY.stars.map((s, i) => 0.05 * Math.pow(10, -0.1 * s[3]) * CLASS_RATE[cls[i]]);
+    const baseRate = SKY.stars.map((s, i) => CFG.baseOutput * Math.pow(10, -0.1 * s[3]) * CLASS_RATE[cls[i]]);
     const nameIdx = new Map(SKY.stars.map((s, i) => [s[6], i]));
-    const wonderAt = new Map(); // star idx -> {name, kind, value, flavour}
-    for (const name of Object.keys(WONDERS)) {
-      if (!nameIdx.has(name)) continue;
-      const [kind, value, flavour] = WONDERS[name];
-      wonderAt.set(nameIdx.get(name), { name, kind, value, flavour });
-    }
-    const wonderSets = WONDER_SETS.map(s => Object.assign({}, s, { idx: s.stars.filter(n => nameIdx.has(n)).map(n => nameIdx.get(n)) }));
     // constellations that touch each other (for the codex)
     const consNeighbours = Array.from({ length: NC }, () => new Set());
     SKY.edges.forEach(e => {
@@ -162,7 +95,7 @@
       return {
         version: SAVE_VERSION, created: nowFn(), saved: nowFn(), clock: 0, active: 0,
         starlight: CFG.startStarlight, insight: 0, home,
-        stars: {}, fleets: [], orders: [], projects: [], wonderDone: {}, messier: {}, devConst: {}, masterConst: {},
+        stars: {}, fleets: [], orders: [], messier: {}, devConst: {}, masterConst: {},
         events: [], eventTimer: rand(CFG.eventFirstDelay), petitions: [], petitionTimer: rand(CFG.petitionGap),
         notes: {}, log: [], evSeq: 0, petitionSeq: 0, fleetSeq: 0, orderSeq: 0,
         stats: { collected: 0, claimed: 0, launched: 0, upgrades: 0, eventsDone: 0, perfect: 0, restoredRoutes: 0, petitionsDone: 0 },
@@ -185,6 +118,9 @@
     }
 
     function load(state) {
+      if (state && state.version === 1) { // v1 had wonder projects, which no longer exist
+        delete state.projects; delete state.wonderDone; state.version = 2;
+      }
       if (!state || state.version !== SAVE_VERSION) throw new Error('Unsupported save');
       S = state;
       recalc();
@@ -197,13 +133,6 @@
 
     function perks() {
       const p = { out: 0, speed: 0, slots: 0, ins: 0, cost: 0, cap: 0, ev: 0 };
-      for (const [i, w] of wonderAt) {
-        if (!S.stars[i]) continue;
-        p[w.kind] += S.wonderDone[i] ? w.value : w.value * 0.5;
-      }
-      for (const set of wonderSets) {
-        if (set.idx.length === set.stars.length && set.idx.every(i => S.stars[i])) p[set.perk[0]] += set.perk[1];
-      }
       for (const k of Object.keys(S.messier)) {
         const m = SKY.messier[k];
         const [kind, v] = MESSIER_PERK[m.kind];
@@ -284,8 +213,6 @@
       const v = Object.keys(S.messier).filter(k => S.messier[k].dev).length;
       return Math.ceil((CFG.developMessierBase + CFG.developMessierStep * v) * costMul());
     }
-    function wonderCost(i) { return { insight: Math.ceil(CFG.wonderInsight * costMul()), starlight: Math.ceil(CFG.wonderStarlightMul * (CFG.claimBase + D.count) * costMul()), seconds: CFG.wonderSeconds }; }
-
     function travelSeconds(fromStar, deg, messier) {
       const reduce = Math.min(1 - CFG.speedFloor, D.P.speed + CFG.beaconSpeed * S.stars[fromStar].b);
       return Math.max(5, deg * CFG.secPerDeg * (messier ? CFG.messierTravelMul : 1) * (1 - reduce));
@@ -411,21 +338,6 @@
     }
     function canCollectConstellation(c) { return !!S.devConst[c]; }
 
-    function startWonder(i) {
-      const w = wonderAt.get(i);
-      if (!w || !S.stars[i]) return result(false, 'Not available.');
-      if (S.wonderDone[i]) return result(false, 'Already complete.');
-      if (S.projects.some(p => p.star === i)) return result(false, 'Already under way.');
-      if (S.stars[i].o < 1) return result(false, 'Needs an Observatory (level 1).');
-      const c = wonderCost(i);
-      if (S.insight < c.insight) return result(false, 'Needs ' + fmt(c.insight) + ' Insight.');
-      if (S.starlight < c.starlight) return result(false, 'Needs ' + fmt(c.starlight) + ' Starlight.');
-      S.insight -= c.insight; S.starlight -= c.starlight;
-      S.projects.push({ star: i, remaining: c.seconds, dur: c.seconds });
-      log('Wonder project begun at ' + w.name + '.', 'wonder');
-      return result(true);
-    }
-
     // ---- petitions
     function addPetition() {
       const open = new Set(S.petitions.map(p => p.star));
@@ -537,7 +449,6 @@
     function nextArrival() {
       let t = Infinity;
       for (const f of S.fleets) t = Math.min(t, f.remaining);
-      for (const p of S.projects) t = Math.min(t, p.remaining);
       return t;
     }
     function accrue(dt) {
@@ -569,13 +480,6 @@
           log('Catalogued M' + m.n + (m.alt ? ' (' + m.alt + ')' : '') + '.', 'messier');
         }
       }
-      for (let k = S.projects.length - 1; k >= 0; k--) {
-        const p = S.projects[k];
-        if (p.remaining > 1e-9) continue;
-        S.projects.splice(k, 1); changed = true;
-        S.wonderDone[p.star] = nowFn();
-        log('Wonder complete: ' + wonderAt.get(p.star).name + '. Its full power is yours.', 'wonder');
-      }
       if (changed) { recalc(); if (dispatch()) recalc(); }
     }
     // Advance the world by dt seconds. `active` = the player has the game open (events and petitions only run then).
@@ -587,7 +491,6 @@
         const step = Math.min(left, Math.max(nextArrival(), 1e-6));
         accrue(step);
         for (const f of S.fleets) f.remaining -= step;
-        for (const p of S.projects) p.remaining -= step;
         S.clock += step; left -= step;
         arrive();
       }
@@ -644,13 +547,13 @@
     }
 
     return {
-      SKY, CFG, TRACKS, TRACK_INFO, MAX_LEVEL, CLASS_NAMES, DEV_LEVELS, MASTER_LEVELS, WONDERS, WONDER_SETS, PERK_LABEL, MESSIER_PERK,
-      adj, edgeIdx, edgeLen, cls, baseRate, wonderAt, wonderSets, consNeighbours, messierByConst, messierFrom, nameIdx,
+      SKY, CFG, TRACKS, TRACK_INFO, MAX_LEVEL, CLASS_NAMES, DEV_LEVELS, MASTER_LEVELS, PERK_LABEL, MESSIER_PERK,
+      adj, edgeIdx, edgeLen, cls, baseRate, consNeighbours, messierByConst, messierFrom, nameIdx,
       get state() { return S; }, get d() { return D; },
       newGame, load, recalc, tick, catchUp,
-      claimCost, upgradeCost, messierCost, developMessierCost, wonderCost, travelSeconds,
+      claimCost, upgradeCost, messierCost, developMessierCost, travelSeconds,
       canLaunchTo, launch, cancelOrder, dispatch, frontierOrigins, targetsPending, canVisitMessier, visitMessier, messierAccess, developMessier,
-      upgrade, collect, collectConstellation, canCollectConstellation, startWonder,
+      upgrade, collect, collectConstellation, canCollectConstellation,
       spawnEvent, redraw, useHint, eventReward, dismissPetition, addPetition,
       consStatus, frontier, attention, messierStats, lvl, fmt, sepDeg,
       serialize() { S.saved = nowFn(); return JSON.stringify(S); },

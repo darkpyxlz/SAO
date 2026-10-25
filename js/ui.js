@@ -124,7 +124,7 @@
       h += '<button class="home" data-act="newgame" data-i="' + i + '"><b><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(name) + '</b> <span class="muted tiny">' + esc(SKY.consts[st[5]].name) + ' · mag ' + st[3].toFixed(2) + '</span><small>' + esc(txt) + '</small></button>';
     }
     h += '</div><p><label class="btn small">Import a save file<input type="file" accept=".json,application/json" id="imp-start" hidden></label></p>';
-    h += '<ul class="how"><li>Stars give <b class="gold">Starlight</b>, and fill a stockpile you collect by visiting them.</li><li>Spend it to send fleets along constellation lines and hyperlanes to claim neighbours.</li><li><b class="cyan">Observatories</b> gather Insight for Messier expeditions and named-star wonders.</li><li>Neighbouring stars of different colours boost each other through trade routes.</li><li>Comets and novae cut routes. Redraw them from memory for a bonus.</li><li>Your progress saves in this browser. Menu → Export keeps a backup.</li></ul></div>';
+    h += '<ul class="how"><li>Stars give <b class="gold">Starlight</b>, and fill a stockpile you collect by visiting them.</li><li>Spend it to send fleets along constellation lines and hyperlanes to claim neighbours.</li><li><b class="cyan">Observatories</b> gather Insight for Messier expeditions.</li><li>Neighbouring stars of different colours boost each other through trade routes.</li><li>Comets and novae cut routes. Redraw them from memory for a bonus.</li><li>Your progress saves in this browser. Menu → Export keeps a backup.</li></ul></div>';
     el.innerHTML = h;
     const imp = $('#imp-start');
     if (imp) imp.onchange = e => { if (e.target.files[0]) importFile(e.target.files[0], st => beginSession(st, false)); };
@@ -152,8 +152,7 @@
     let t;
     if (hit.type === 'star') {
       const st = SKY.stars[hit.i];
-      t = (S.stars[hit.i] || st[7] ? st[6] : '?') + ' · ' + SKY.consts[st[5]].id + ' · mag ' + st[3].toFixed(1);
-      if (!S.stars[hit.i] && !st[7]) t = 'Unclaimed star · ' + SKY.consts[st[5]].id + ' · mag ' + st[3].toFixed(1);
+      t = st[6] + ' · ' + SKY.consts[st[5]].id + ' · mag ' + st[3].toFixed(1) + (S.stars[hit.i] ? '' : ' · unclaimed');
     } else {
       const m = SKY.messier[hit.i];
       t = 'M' + m.n + (S.messier[hit.i] && m.alt ? ' · ' + m.alt : '') + ' · ' + m.tname;
@@ -197,7 +196,7 @@
       const dis = D.dis[e];
       const comp = G.cls[i] !== G.cls[to];
       const tag = dis ? '<span class="badge red">cut</span>' : cl && S.stars[i] ? '<span class="badge ' + (comp ? 'green' : '') + '">' + (comp ? '+complementary' : '+same colour') + '</span>' : '';
-      h += '<div class="row tiny"><span class="grow"><span class="dot" style="background:' + rgbOf(to) + '"></span><span class="link" data-act="sel-star" data-i="' + to + '">' + esc(cl || SKY.stars[to][7] ? SKY.stars[to][6] : 'Unclaimed star') + '</span> <span class="muted">' + G.edgeLen[e].toFixed(1) + '°' + (lane ? ' lane' : '') + '</span></span>' + (cl ? '' : '<span class="muted">○</span>') + tag + '</div>';
+      h += '<div class="row tiny"><span class="grow"><span class="dot" style="background:' + rgbOf(to) + '"></span><span class="link" data-act="sel-star" data-i="' + to + '">' + esc(SKY.stars[to][6]) + '</span> <span class="muted">' + G.edgeLen[e].toFixed(1) + '°' + (lane ? ' lane' : '') + '</span></span>' + (cl ? '' : '<span class="muted">○</span>') + tag + '</div>';
     }
     return h;
   }
@@ -208,15 +207,13 @@
   }
   function starPanel(i) {
     const S = G.state, D = G.d, st = SKY.stars[i], s = S.stars[i], con = SKY.consts[st[5]];
-    const wd = G.wonderAt.get(i);
-    let h = '<div class="p-head"><h3>' + esc(s || st[7] ? st[6] : 'Unclaimed star') + '</h3><button class="x" data-act="close-panel" aria-label="Close">✕</button></div>';
-    h += '<div class="p-sub"><span class="link" data-act="open-const" data-c="' + st[5] + '">' + esc(con.name) + '</span> · <span class="dot" style="background:' + rgbOf(i) + '"></span>' + CL[G.cls[i]] + ' · mag ' + st[3].toFixed(2) + (wd ? ' · <span class="badge gold">Wonder</span>' : '') + (i === S.home ? ' · <span class="badge cyan">Home</span>' : '') + '</div>';
+    let h = '<div class="p-head"><h3>' + esc(st[6]) + '</h3><button class="x" data-act="close-panel" aria-label="Close">✕</button></div>';
+    h += '<div class="p-sub"><span class="link" data-act="open-const" data-c="' + st[5] + '">' + esc(con.name) + '</span> · <span class="dot" style="background:' + rgbOf(i) + '"></span>' + CL[G.cls[i]] + ' · mag ' + st[3].toFixed(2) + (i === S.home ? ' · <span class="badge cyan">Home</span>' : '') + '</div>';
     if (!s) {
       const chk = G.canLaunchTo(i);
       const origins = G.frontierOrigins(i).map(o => ({ o, sec: G.travelSeconds(o.from, o.deg, false) })).sort((a, b) => a.sec - b.sec);
       const pend = G.targetsPending().has(i);
       h += '<div class="p-sec"><h4>Expansion</h4>';
-      if (!st[7]) h += '<div class="muted tiny">Its name will be revealed once claimed.</div>';
       if (pend) h += '<div class="row"><span class="badge gold">A fleet is bound here</span></div>';
       else {
         h += '<div class="row"><span class="l">Cost</span><span class="grow"></span><b class="' + (S.starlight >= G.claimCost() ? 'gold' : 'bad') + '">✦ ' + fmt(G.claimCost()) + '</b></div>';
@@ -250,17 +247,6 @@
     }
     const lv = s.r + s.b + s.o;
     h += '<div class="muted tiny">Total ' + lv + ' · constellation counts as developed at ' + G.DEV_LEVELS + ' per star, mastered at ' + G.MASTER_LEVELS + '.</div></div>';
-    // wonder
-    if (wd) {
-      const done = S.wonderDone[i], proj = S.projects.find(p => p.star === i), wc = G.wonderCost(i);
-      h += '<div class="p-sec"><h4>Wonder: ' + esc(wd.name) + '</h4><div class="muted tiny" style="margin-bottom:4px">' + esc(wd.flavour) + '</div>';
-      h += '<div class="row"><span class="grow">' + esc(PERK_TXT(wd.kind, wd.value)) + '</span>' + (done ? '<span class="badge gold">full power</span>' : '<span class="badge">half power</span>') + '</div>';
-      if (!done) {
-        if (proj) h += '<div class="bar cy"><i data-lv="proj" style="width:0%"></i></div><div class="row tiny muted"><span data-lv="projt"></span></div>';
-        else h += '<div class="row tiny"><span class="cyan">◉ ' + fmt(wc.insight) + '</span><span class="gold">✦ ' + fmt(wc.starlight) + '</span><span class="muted">' + dur(wc.seconds) + '</span><span class="grow"></span><button class="btn small primary" data-act="wonder" data-i="' + i + '"' + (s.o >= 1 && S.insight >= wc.insight && S.starlight >= wc.starlight ? '' : ' disabled') + '>Begin project</button></div>' + (s.o < 1 ? '<div class="muted tiny">Needs Observatory level 1.</div>' : '');
-      }
-      h += '</div>';
-    }
     // nearby messier
     const ms = G.messierFrom[i];
     if (ms.length) {
@@ -296,7 +282,7 @@
       h += '<div class="row tiny"><span class="muted">Study in depth</span><span class="cyan">◉ ' + fmt(c) + '</span><span class="grow"></span><button class="btn small" data-act="develop-m" data-i="' + m + '"' + (S.insight >= c ? '' : ' disabled') + '>Double bonus</button></div>';
     }
     h += '</div><div class="p-sec"><h4>Launch points</h4>';
-    for (const s of M.links) h += '<div class="row tiny"><span class="grow"><span class="link" data-act="sel-star" data-i="' + s + '">' + esc(S.stars[s] || SKY.stars[s][7] ? SKY.stars[s][6] : 'Unclaimed star') + '</span></span>' + (S.stars[s] ? '<span class="badge green">yours</span>' : '<span class="muted">○</span>') + '</div>';
+    for (const s of M.links) h += '<div class="row tiny"><span class="grow"><span class="link" data-act="sel-star" data-i="' + s + '">' + esc(SKY.stars[s][6]) + '</span></span>' + (S.stars[s] ? '<span class="badge green">yours</span>' : '<span class="muted">○</span>') + '</div>';
     return h + '</div>';
   }
   function renderPanel() {
@@ -316,8 +302,6 @@
       if (q('ins')) q('ins').textContent = '◉ ' + fmt(s.i) + ' / ' + fmt(icap);
       if (q('rate')) q('rate').textContent = '✦ ' + rateText(D.rate[i]);
       if (q('rbreak')) q('rbreak').textContent = 'base ' + rateText(G.baseRate[i]) + ' × radiance ' + (1 + 0.5 * s.r).toFixed(1) + ' × routes ' + D.routeMul[i].toFixed(2) + ' × empire ' + D.globalOut.toFixed(2);
-      const pj = G.state.projects.find(p => p.star === i);
-      if (pj && q('proj')) { q('proj').style.width = (100 - pj.remaining / pj.dur * 100) + '%'; q('projt').textContent = 'Wonder project: ' + dur(pj.remaining) + ' left'; }
     }
   }
 
@@ -441,24 +425,14 @@
     },
     stars(body) {
       const S = G.state;
-      let h = '<h3 style="margin-top:0">Wonders</h3><div class="muted tiny" style="margin-bottom:8px">Named stars with a power of their own. Claiming one grants half of it; a wonder project at an Observatory grants the rest.</div><table class="t"><tr><th>Star</th><th>Constellation</th><th>Power</th><th>Status</th></tr>';
-      const ws = [...G.wonderAt.entries()].sort((a, b) => SKY.stars[a[0]][3] - SKY.stars[b[0]][3]);
-      for (const [i, w] of ws) {
-        const cl = !!S.stars[i], done = !!S.wonderDone[i];
-        h += '<tr class="' + (cl ? 'click' : '') + '" ' + (cl ? 'data-act="goto-star" data-i="' + i + '"' : '') + '><td>' + (cl ? esc(w.name) : '<span class="muted">???</span>') + '</td><td class="muted">' + esc(SKY.consts[SKY.stars[i][5]].name) + '</td><td>' + (cl ? esc(PERK_TXT(w.kind, w.value)) : '<span class="muted">?</span>') + '</td><td>' + (done ? '<span class="badge gold">full</span>' : cl ? '<span class="badge green">half</span>' : '<span class="badge">unclaimed</span>') + '</td></tr>';
-      }
-      h += '</table><h3>Star sets</h3><div class="muted tiny" style="margin-bottom:8px">Own every star in a set for a bonus.</div><table class="t"><tr><th>Set</th><th>Stars</th><th>Bonus</th></tr>';
-      for (const set of G.wonderSets) {
-        const have = set.idx.filter(i => S.stars[i]).length, all = have === set.stars.length;
-        h += '<tr><td>' + esc(set.name) + (all ? ' <span class="badge gold">active</span>' : '') + '</td><td>' + set.idx.map(i => S.stars[i] ? esc(SKY.stars[i][6]) : '<span class="muted">?</span>').join(', ') + '</td><td>' + esc(PERK_TXT(set.perk[0], set.perk[1])) + '</td></tr>';
-      }
-      const named = SKY.stars.map((s, i) => i).filter(i => SKY.stars[i][7]);
+      const named = SKY.stars.map((s, i) => i).filter(i => SKY.stars[i][7]).sort((a, b) => SKY.stars[a][3] - SKY.stars[b][3]);
       const got = named.filter(i => S.stars[i]);
-      h += '</table><h3>Named-star catalogue <span class="muted tiny">' + got.length + ' / ' + named.length + '</span></h3><table class="t"><tr><th>Name</th><th>Constellation</th><th>Class</th><th>Mag</th></tr>';
-      named.sort((a, b) => SKY.stars[a][3] - SKY.stars[b][3]);
+      let h = '<div class="prog"><div class="row"><b>' + got.length + ' / ' + named.length + '</b><span class="muted">important stars claimed</span></div><div class="bar"><i style="width:' + (got.length / named.length * 100) + '%"></i></div></div>';
+      h += '<div class="muted tiny" style="margin-bottom:8px">Only the brightest and most famous stars have proper names. Every other star is shown by its official designation (a Bayer letter such as \u03b2 Ori, a Flamsteed number such as 61 Cyg, or an HD / HIP catalogue number).</div>';
+      h += '<table class="t"><tr><th>Name</th><th>Constellation</th><th>Class</th><th>Mag</th><th></th></tr>';
       for (const i of named) {
         const st = SKY.stars[i], cl = !!S.stars[i];
-        h += '<tr class="' + (cl ? 'click' : '') + '" ' + (cl ? 'data-act="goto-star" data-i="' + i + '"' : '') + '><td>' + (cl ? '<span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) : '<span class="muted">???</span>') + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + (cl ? CL[G.cls[i]] : '') + '</td><td>' + (cl ? st[3].toFixed(2) : '') + '</td></tr>';
+        h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(2) + '</td><td>' + (cl ? '<span class="badge green">claimed</span>' : '<span class="badge">unclaimed</span>') + '</td></tr>';
       }
       body.innerHTML = h + '</table>';
     },
@@ -502,7 +476,7 @@
     const order = cons.stars.slice().sort((a, b) => SKY.stars[a][3] - SKY.stars[b][3]);
     for (const i of order) {
       const st = SKY.stars[i], s = S.stars[i];
-      h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td>' + (s ? '<span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + (G.wonderAt.has(i) ? ' <span class="gold">◆</span>' : '') : '<span class="muted">unclaimed' + (st[7] ? ' · named star' : '') + '</span>') + '</td><td class="muted">' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(1) + '</td><td>' + (s ? G.lvl(i) + '<span class="muted">/' + G.DEV_LEVELS + '</span>' : '<span class="muted">·</span>') + '</td></tr>';
+      h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td>' + (s ? '<span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) : '<span class="muted">' + esc(st[6]) + '</span>') + '</td><td class="muted">' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(1) + '</td><td>' + (s ? G.lvl(i) + '<span class="muted">/' + G.DEV_LEVELS + '</span>' : '<span class="muted">·</span>') + '</td></tr>';
     }
     h += '</table></div>';
     const nb = [...G.consNeighbours[c]].sort((a, b) => SKY.consts[a].name.localeCompare(SKY.consts[b].name));
@@ -533,12 +507,12 @@
     let h = '<div class="muted" style="margin-bottom:10px">' + S.fleets.length + ' of ' + D.slots + ' fleets out. More slots come from Beacon levels, Arcturus, the Orion\u2019s Belt set and globular clusters.</div><h3 style="margin-top:0">In flight</h3>';
     if (!S.fleets.length) h += '<div class="muted">None.</div>';
     for (const f of S.fleets) {
-      const to = f.kind === 's' ? (SKY.stars[f.to][7] ? SKY.stars[f.to][6] : 'an unclaimed star') : 'M' + SKY.messier[f.to].n;
+      const to = f.kind === 's' ? SKY.stars[f.to][6] : 'M' + SKY.messier[f.to].n;
       h += '<div class="row"><span class="grow">' + (f.kind === 'm' ? '<span class="cyan">expedition</span>' : 'fleet') + ' <span class="muted">from</span> ' + esc(SKY.stars[f.from][6]) + ' <span class="muted">to</span> <span class="link" data-act="' + (f.kind === 's' ? 'goto-star' : 'goto-messier') + '" data-i="' + f.to + '">' + esc(to) + '</span></span><span class="muted">' + dur(f.remaining) + '</span></div>';
     }
     h += '<h3>Queued orders</h3>';
     if (!S.orders.length) h += '<div class="muted">None. Select an unclaimed star while all fleets are out to queue an order.</div>';
-    for (const o of S.orders) h += '<div class="row"><span class="grow">claim <span class="link" data-act="goto-star" data-i="' + o.to + '">' + esc(SKY.stars[o.to][7] ? SKY.stars[o.to][6] : 'an unclaimed star') + '</span> <span class="muted">in ' + esc(SKY.consts[SKY.stars[o.to][5]].name) + '</span></span><span class="gold">\u2726 ' + fmt(o.paid) + '</span><button class="btn small" data-act="cancel-order" data-id="' + o.id + '">Cancel</button></div>';
+    for (const o of S.orders) h += '<div class="row"><span class="grow">claim <span class="link" data-act="goto-star" data-i="' + o.to + '">' + esc(SKY.stars[o.to][6]) + '</span> <span class="muted">in ' + esc(SKY.consts[SKY.stars[o.to][5]].name) + '</span></span><span class="gold">\u2726 ' + fmt(o.paid) + '</span><button class="btn small" data-act="cancel-order" data-id="' + o.id + '">Cancel</button></div>';
     body.innerHTML = h;
   }
 
@@ -560,13 +534,12 @@
       $('#imp-menu').onchange = e => { if (e.target.files[0]) importFile(e.target.files[0], st => { if (confirm('Replace your current empire with this save?')) { closeModal(); beginSession(st, false); } }); };
     },
     guide(body) {
-      body.innerHTML = '<div class="how" style="max-width:720px"><h3 style="margin-top:0">Goal</h3><p>Claim every star on the constellation stick figures, develop every constellation, catalogue all 110 Messier objects and collect the wonders.</p>' +
+      body.innerHTML = '<div class="how" style="max-width:720px"><h3 style="margin-top:0">Goal</h3><p>Claim every star on the constellation stick figures, develop every constellation and catalogue all 110 Messier objects. The map is one flat sky that wraps left to right: drag to pan, scroll or pinch to zoom.</p>' +
         '<h3>Core loop</h3><ul><li><b class="gold">Starlight ✦</b> is made by every claimed star. It fills that star’s stockpile: <b>tap the star and Collect</b> (stockpiles stop growing when full, so visit often; red-orange stars hold the most).</li>' +
         '<li><b>Claim</b> a new star: select an unclaimed star next to your territory (ringed in blue) and send a fleet. Orders are paid up front and fly as soon as a fleet is free, even while you are away.</li>' +
         '<li><b>Develop</b> stars with Radiance (more Starlight), Beacon (faster fleets, stronger routes, more fleet slots) and Observatory (Insight ◉).</li>' +
         '<li><b>Trade routes</b>: neighbouring claimed stars boost each other, more when their colours differ.</li>' +
         '<li><b class="cyan">Messier objects</b> need a claimed star nearby and Insight. Each gives a bonus by type (globulars: fleet slots, open clusters: Starlight, nebulae: Insight, galaxies: speed).</li>' +
-        '<li><b>Wonders</b>: famous named stars with unique powers (diamond markers). Claim for half power; an Observatory project grants the rest.</li>' +
         '<li><b>Developed constellation</b>: every star claimed and at least ' + G.DEV_LEVELS + ' upgrade levels each. It is stamped in the Codex and unlocks one-tap collection there. <b>Mastered</b> at ' + G.MASTER_LEVELS + '.</li></ul>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
         '<h3>Petitions</h3><p>Stars sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. They are never penalties. Nothing in this game dims, decays or is taken from you.</p></div>';
@@ -600,7 +573,6 @@
     'upgrade': el => { const r = G.upgrade(+el.dataset.i, el.dataset.t); toast(r.ok ? r.msg : r.msg, r.ok ? 'good' : 'bad'); },
     'launch': el => { const r = G.launch(+el.dataset.i); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'cancel-order': el => { const r = G.cancelOrder(+el.dataset.id); toast(r.msg, r.ok ? 'good' : 'bad'); },
-    'wonder': el => { const r = G.startWonder(+el.dataset.i); toast(r.ok ? 'Wonder project begun.' : r.msg, r.ok ? 'good' : 'bad'); },
     'visit-m': el => { const r = G.visitMessier(+el.dataset.i); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'develop-m': el => { const r = G.developMessier(+el.dataset.i); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'dismiss-pet': el => G.dismissPetition(+el.dataset.id),
@@ -633,7 +605,7 @@
     const L = G.state.log;
     for (let k = Math.max(ui.lastLog, L.length - 4); k < L.length; k++) {
       const l = L[k];
-      if (['claim', 'messier', 'dev', 'wonder', 'event', 'petition', 'event-done'].includes(l.kind) && k > 0) toast(l.text, l.kind === 'event' ? 'bad' : 'gold');
+      if (['claim', 'messier', 'dev', 'event', 'petition', 'event-done'].includes(l.kind) && k > 0) toast(l.text, l.kind === 'event' ? 'bad' : 'gold');
     }
     if (L.length !== ui.lastLog) scheduleSave();
     ui.lastLog = L.length;

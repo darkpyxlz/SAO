@@ -1,25 +1,14 @@
-/* Firmament sky renderer: stereographic star chart on a canvas, plus the small constellation charts used in the codex. */
+/* Firmament sky renderer: a flat, horizontally wrapping star map (Miller cylindrical projection)
+   with pan, zoom and picking, plus the small constellation charts used in the codex. */
 (function () {
   'use strict';
   const RAD = Math.PI / 180;
-  const TAU = Math.PI * 2;
+  const PI = Math.PI, TAU = Math.PI * 2;
+  const wrap = d => d - TAU * Math.floor((d + PI) / TAU); // -> [-PI, PI)
+  const millerY = decDeg => 1.25 * Math.log(Math.tan(PI / 4 + 0.4 * decDeg * RAD));
+  const YMAX = millerY(90);
+  const OBLIQUITY = 23.4393 * RAD;
 
-  function vec(ra, dec) { const r = ra * RAD, d = dec * RAD, c = Math.cos(d); return [c * Math.cos(r), c * Math.sin(r), Math.sin(d)]; }
-  function basis(ra0, dec0) {
-    const r = ra0 * RAD, d = dec0 * RAD;
-    return {
-      c: [Math.cos(d) * Math.cos(r), Math.cos(d) * Math.sin(r), Math.sin(d)],
-      e: [-Math.sin(r), Math.cos(r), 0],
-      n: [-Math.sin(d) * Math.cos(r), -Math.sin(d) * Math.sin(r), Math.cos(d)],
-    };
-  }
-  function slerp(a, b, t) {
-    const dot = Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
-    const w = Math.acos(dot);
-    if (w < 1e-6) return a.slice();
-    const s = Math.sin(w), k1 = Math.sin((1 - t) * w) / s, k2 = Math.sin(t * w) / s;
-    return [a[0] * k1 + b[0] * k2, a[1] * k1 + b[1] * k2, a[2] * k1 + b[2] * k2];
-  }
   // approximate star colour from B-V
   const STOPS = [[-0.3, 155, 176, 255], [0, 170, 191, 255], [0.3, 202, 216, 255], [0.6, 255, 244, 234], [0.8, 255, 228, 186], [1.2, 255, 200, 125], [1.8, 255, 160, 100]];
   function bvRGB(bv) {
@@ -32,70 +21,73 @@
     }
     return [255, 160, 100];
   }
+  // circular mean of right ascensions (radians)
+  function meanRA(list) {
+    let sx = 0, sy = 0;
+    for (const r of list) { sx += Math.cos(r); sy += Math.sin(r); }
+    return Math.atan2(sy, sx);
+  }
 
   function create(canvas, G, hooks) {
     const SKY = G.SKY;
     const N = SKY.stars.length, NM = SKY.messier.length;
     const ctx = canvas.getContext('2d');
-    let W = 0, H = 0, dpr = 1;
-    const v = { ra0: 83, dec0: 5, zoom: 1.4 };
+    let W = 0, H = 0, dpr = 1, cx = 0, cy = 0;
+    // view: x0 = centre right ascension (rad), y0 = centre in map units, zoom relative to base scale
+    const v = { x0: 1.4, y0: 0.1, zoom: 1.4 };
     let anim = null;
 
-    const sv = SKY.stars.map(s => vec(s[1], s[2]));
-    const mv = SKY.messier.map(m => vec(m.ra, m.dec));
+    const sra = SKY.stars.map(s => s[1] * RAD), sY = SKY.stars.map(s => millerY(s[2]));
+    const mra = SKY.messier.map(m => m.ra * RAD), mY = SKY.messier.map(m => millerY(m.dec));
+    const cra = SKY.consts.map(c => c.ra * RAD), cY = SKY.consts.map(c => millerY(c.dec));
     const starRGB = SKY.stars.map(s => bvRGB(s[4]));
     const starCol = starRGB.map(c => 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')');
-    const cv = SKY.consts.map(c => vec(c.ra, c.dec));
     const F = SKY.field, NF = F.length / 3;
-    const fv = new Float32Array(NF * 3), fm = new Float32Array(NF);
-    for (let i = 0; i < NF; i++) { const p = vec(F[3 * i] / 100, F[3 * i + 1] / 100); fv[3 * i] = p[0]; fv[3 * i + 1] = p[1]; fv[3 * i + 2] = p[2]; fm[i] = F[3 * i + 2] / 10; }
+    const fra = new Float32Array(NF), fY = new Float32Array(NF), fm = new Float32Array(NF);
+    for (let i = 0; i < NF; i++) { fra[i] = F[3 * i] / 100 * RAD; fY[i] = millerY(F[3 * i + 1] / 100); fm[i] = F[3 * i + 2] / 10; }
+    const eclip = [];
+    for (let l = 0; l <= 360; l += 4) { const lr = l * RAD; eclip.push([Math.atan2(Math.cos(OBLIQUITY) * Math.sin(lr), Math.cos(lr)), millerY(Math.asin(Math.sin(OBLIQUITY) * Math.sin(lr)) / RAD)]); }
 
     const sx = new Float32Array(N), sy = new Float32Array(N), svis = new Uint8Array(N);
     const mx = new Float32Array(NM), my = new Float32Array(NM), mvis = new Uint8Array(NM);
-    let B = basis(v.ra0, v.dec0), scale = 300, cx = 0, cy = 0;
+    let scale = 300;
 
+    const baseScale = () => (Math.min(W, H) / 2) / 1.155;
+    const minScale = () => Math.max(W / TAU, H / (2 * YMAX + 0.3));
     function resize() {
       dpr = Math.min(2, window.devicePixelRatio || 1);
       W = canvas.clientWidth; H = canvas.clientHeight;
       canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
       cx = W / 2; cy = H / 2;
+      clampView();
     }
-    function updateCam() {
-      B = basis(v.ra0, v.dec0);
-      scale = (Math.min(W, H) / 2) / 1.155 * v.zoom * (Math.max(W, H) / Math.min(W, H) > 1.6 ? 1.15 : 1);
+    function clampView() {
+      if (!W) return;
+      const b = baseScale();
+      v.zoom = Math.max(minScale() / b, Math.min(45, v.zoom));
+      v.y0 = Math.max(-YMAX, Math.min(YMAX, v.y0));
+      v.x0 = ((v.x0 % TAU) + TAU) % TAU;
     }
-    function proj(p, out) { // -> sets out.x,out.y,out.vis
-      const cosc = p[0] * B.c[0] + p[1] * B.c[1] + p[2] * B.c[2];
-      if (cosc < -0.75) { out.vis = 0; return out; }
-      const k = 2 / (1 + cosc);
-      out.x = cx - k * (p[0] * B.e[0] + p[1] * B.e[1] + p[2] * B.e[2]) * scale;
-      out.y = cy - k * (p[0] * B.n[0] + p[1] * B.n[1] + p[2] * B.n[2]) * scale;
-      out.vis = 1; return out;
-    }
-    const tmp = { x: 0, y: 0, vis: 0 };
+    function updateCam() { scale = v.zoom * baseScale(); }
 
     // ---- camera control
-    function clampView() { v.dec0 = Math.max(-89, Math.min(89, v.dec0)); v.ra0 = ((v.ra0 % 360) + 360) % 360; v.zoom = Math.max(0.55, Math.min(60, v.zoom)); }
-    function panPx(dx, dy, px, py) {
+    function panPx(dx, dy) { updateCam(); v.x0 += dx / scale; v.y0 += dy / scale; clampView(); anim = null; }
+    function zoomAt(f, px, py) {
       updateCam();
-      const rx = (cx - px) / scale, ry = (cy - py) / scale; // plane coords of pointer
-      const loc = scale * (1 + (rx * rx + ry * ry) / 4);
-      v.ra0 += (dx / (loc * Math.max(0.15, Math.cos(v.dec0 * RAD)))) / RAD;
-      v.dec0 += (dy / loc) / RAD;
+      const du = (cx - px) / scale, dv = (cy - py) / scale;
+      v.zoom *= f; clampView(); updateCam();
+      v.x0 += du - (cx - px) / scale; v.y0 += dv - (cy - py) / scale;
       clampView(); anim = null;
     }
-    function zoomAt(f, px, py) {
-      v.zoom *= f; clampView(); anim = null;
-    }
     function goTo(ra, dec, zoom, ms) {
-      anim = { t0: performance.now(), ms: ms || 700, from: { ra0: v.ra0, dec0: v.dec0, zoom: v.zoom }, to: { ra0: ra, dec0: dec, zoom: zoom || v.zoom } };
-      let d = anim.to.ra0 - anim.from.ra0; if (d > 180) anim.from.ra0 += 360; if (d < -180) anim.from.ra0 -= 360;
+      anim = { t0: performance.now(), ms: ms || 700, from: { x0: v.x0, y0: v.y0, zoom: v.zoom }, to: { x0: ra * RAD, y0: millerY(dec), zoom: zoom || v.zoom } };
+      anim.to.x0 = anim.from.x0 + wrap(anim.to.x0 - anim.from.x0);
     }
     function stepAnim() {
       if (!anim) return;
       const t = Math.min(1, (performance.now() - anim.t0) / anim.ms), e = t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      v.ra0 = anim.from.ra0 + (anim.to.ra0 - anim.from.ra0) * e;
-      v.dec0 = anim.from.dec0 + (anim.to.dec0 - anim.from.dec0) * e;
+      v.x0 = anim.from.x0 + (anim.to.x0 - anim.from.x0) * e;
+      v.y0 = anim.from.y0 + (anim.to.y0 - anim.from.y0) * e;
       v.zoom = anim.from.zoom * Math.pow(anim.to.zoom / anim.from.zoom, e);
       clampView();
       if (t >= 1) anim = null;
@@ -115,7 +107,7 @@
       const p = ptrs.get(e.pointerId);
       if (!p) { hooks.onHover && hooks.onHover(e.clientX, e.clientY); return; }
       const dx = e.clientX - p.x, dy = e.clientY - p.y;
-      if (ptrs.size === 1) { moved += Math.abs(dx) + Math.abs(dy); if (moved > 6) panPx(dx, dy, e.clientX, e.clientY); }
+      if (ptrs.size === 1) { moved += Math.abs(dx) + Math.abs(dy); if (moved > 6) panPx(dx, dy); }
       else if (ptrs.size === 2) {
         p.x = e.clientX; p.y = e.clientY;
         const [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -151,16 +143,15 @@
       return best;
     }
 
-    // ---- drawing
-    function edgePath(a, b, deg) {
-      const n = Math.max(1, Math.ceil(deg / 3));
-      let started = false;
-      for (let k = 0; k <= n; k++) {
-        const p = k === 0 ? sv[a] : k === n ? sv[b] : slerp(sv[a], sv[b], k / n);
-        proj(p, tmp);
-        if (!tmp.vis) { started = false; continue; }
-        if (!started) { ctx.moveTo(tmp.x, tmp.y); started = true; } else ctx.lineTo(tmp.x, tmp.y);
-      }
+    // ---- drawing helpers
+    const px = r => cx - wrap(r - v.x0) * scale;
+    const py = Y => cy - (Y - v.y0) * scale;
+    function lineBetween(a, b) { // route a->b, drawn on both sides of the seam when it crosses it
+      const d = wrap(sra[b] - sra[a]) * scale;
+      const xa = sx[a], ya = sy[a], xb = xa - d, yb = sy[b];
+      const onscreen = (x1, y1, x2, y2) => !(Math.max(x1, x2) < -10 || Math.min(x1, x2) > W + 10 || Math.max(y1, y2) < -10 || Math.min(y1, y2) > H + 10);
+      if (onscreen(xa, ya, xb, yb)) { ctx.moveTo(xa, ya); ctx.lineTo(xb, yb); }
+      if (Math.abs(xb - sx[b]) > 1) { const xa2 = sx[b] + d; if (onscreen(xa2, ya, sx[b], yb)) { ctx.moveTo(xa2, ya); ctx.lineTo(sx[b], yb); } }
     }
     function drawMessierGlyph(x, y, kind, r, visited, hot) {
       ctx.lineWidth = 1.2;
@@ -182,6 +173,44 @@
       ctx.fillStyle = col;
       ctx.fillText(s, x, y);
     }
+    function graticule() {
+      ctx.lineWidth = 1;
+      ctx.font = '10px system-ui, sans-serif'; ctx.textAlign = 'left';
+      for (let h = 0; h < 24; h += 2) {
+        const x = px(h * 15 * RAD);
+        if (x < -2 || x > W + 2) continue;
+        ctx.strokeStyle = 'rgba(120,150,230,.08)';
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.fillStyle = 'rgba(150,170,230,.38)'; ctx.fillText(h + 'h', x + 3, H - 6);
+      }
+      for (let d = -60; d <= 60; d += 30) {
+        const y = py(millerY(d));
+        if (y < -2 || y > H + 2) continue;
+        ctx.strokeStyle = d === 0 ? 'rgba(120,150,230,.18)' : 'rgba(120,150,230,.08)';
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        ctx.fillStyle = 'rgba(150,170,230,.38)'; ctx.fillText((d > 0 ? '+' : '') + d + '°', 4, y - 3);
+      }
+      // ecliptic
+      ctx.setLineDash([3, 6]); ctx.strokeStyle = 'rgba(255,217,138,.16)'; ctx.beginPath();
+      let prevR = null, x = 0;
+      for (const [r, Y] of eclip) {
+        if (prevR === null) x = px(r); else x -= wrap(r - prevR) * scale;
+        const y = py(Y);
+        if (prevR === null) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        prevR = r;
+      }
+      ctx.stroke();
+      // the same curve shifted one world to either side so the seam never shows a gap
+      for (const k of [-1, 1]) {
+        ctx.beginPath(); prevR = null;
+        for (const [r, Y] of eclip) { if (prevR === null) x = px(r) + k * TAU * scale; else x -= wrap(r - prevR) * scale; const y = py(Y); if (prevR === null) ctx.moveTo(x, y); else ctx.lineTo(x, y); prevR = r; }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      // map edges at the celestial poles
+      ctx.strokeStyle = 'rgba(120,150,230,.3)';
+      for (const Y of [-YMAX, YMAX]) { const y = py(Y); if (y > -2 && y < H + 2) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); } }
+    }
 
     function render(t, ui) {
       if (!W) return;
@@ -189,21 +218,21 @@
       updateCam();
       const S = G.state, D = G.d;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      // background
-      const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.8);
-      bg.addColorStop(0, '#0b1124'); bg.addColorStop(1, '#03050b');
-      ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#04060d'; ctx.fillRect(0, 0, W, H);
+      // area beyond the poles
+      ctx.fillStyle = '#020309';
+      const yt = py(YMAX), yb = py(-YMAX);
+      if (yt > 0) ctx.fillRect(0, 0, W, yt);
+      if (yb < H) ctx.fillRect(0, yb, W, H - yb);
+      graticule();
 
       // field stars
       const fz = Math.min(1.8, 0.8 + v.zoom * 0.18);
       for (let i = 0; i < NF; i++) {
-        const cosc = fv[3 * i] * B.c[0] + fv[3 * i + 1] * B.c[1] + fv[3 * i + 2] * B.c[2];
-        if (cosc < -0.75) continue;
-        const k = 2 / (1 + cosc);
-        const x = cx - k * (fv[3 * i] * B.e[0] + fv[3 * i + 1] * B.e[1] + fv[3 * i + 2] * B.e[2]) * scale;
-        if (x < -4 || x > W + 4) continue;
-        const y = cy - k * (fv[3 * i] * B.n[0] + fv[3 * i + 1] * B.n[1] + fv[3 * i + 2] * B.n[2]) * scale;
+        const y = cy - (fY[i] - v.y0) * scale;
         if (y < -4 || y > H + 4) continue;
+        const x = cx - wrap(fra[i] - v.x0) * scale;
+        if (x < -4 || x > W + 4) continue;
         const m = fm[i], a = Math.max(0.1, 0.62 - (m - 2) * 0.12);
         ctx.fillStyle = 'rgba(190,205,255,' + a.toFixed(2) + ')';
         const s = m < 4 ? 1.7 * fz : m < 5.3 ? 1.2 * fz : 0.9 * fz;
@@ -212,18 +241,24 @@
 
       // constellation names
       if (v.zoom < 3.2) {
-        for (let i = 0; i < cv.length; i++) {
-          proj(cv[i], tmp);
-          if (!tmp.vis || tmp.x < -60 || tmp.x > W + 60 || tmp.y < -20 || tmp.y > H + 20) continue;
+        for (let i = 0; i < SKY.consts.length; i++) {
+          const x = px(cra[i]), y = py(cY[i]);
+          if (x < -60 || x > W + 60 || y < -20 || y > H + 20) continue;
           const cs = G.consStatus(i);
           const col = cs.mastered ? 'rgba(255,217,138,.75)' : cs.developed ? 'rgba(255,217,138,.55)' : cs.claimed ? 'rgba(160,190,255,.55)' : 'rgba(150,165,205,.24)';
-          text(SKY.consts[i].name.toUpperCase(), tmp.x, tmp.y, v.zoom < 1 ? 9 : 11, col, 'center', '600');
+          text(SKY.consts[i].name.toUpperCase(), x, y, v.zoom < 1 ? 9 : 11, col, 'center', '600');
         }
       }
 
       // project nodes
-      for (let i = 0; i < N; i++) { proj(sv[i], tmp); svis[i] = tmp.vis && tmp.x > -30 && tmp.x < W + 30 && tmp.y > -30 && tmp.y < H + 30 ? 1 : 0; sx[i] = tmp.x; sy[i] = tmp.y; }
-      for (let i = 0; i < NM; i++) { proj(mv[i], tmp); mvis[i] = tmp.vis && tmp.x > -30 && tmp.x < W + 30 && tmp.y > -30 && tmp.y < H + 30 ? 1 : 0; mx[i] = tmp.x; my[i] = tmp.y; }
+      for (let i = 0; i < N; i++) {
+        sx[i] = px(sra[i]); sy[i] = py(sY[i]);
+        svis[i] = sx[i] > -30 && sx[i] < W + 30 && sy[i] > -30 && sy[i] < H + 30 ? 1 : 0;
+      }
+      for (let i = 0; i < NM; i++) {
+        mx[i] = px(mra[i]); my[i] = py(mY[i]);
+        mvis[i] = mx[i] > -30 && mx[i] < W + 30 && my[i] > -30 && my[i] < H + 30 ? 1 : 0;
+      }
 
       const evHot = new Set(), evEdges = new Set();
       for (const ev of S.events) for (const e of ev.edges) if (!ev.restored.includes(e)) { evEdges.add(e); evHot.add(SKY.edges[e][0]); evHot.add(SKY.edges[e][1]); }
@@ -234,12 +269,11 @@
       for (let pass = 0; pass < 2; pass++) {
         for (let i = 0; i < E.length; i++) {
           const a = E[i][0], b = E[i][1], lane = E[i][2] < 0;
-          if (!svis[a] && !svis[b]) continue;
           const ca = !!S.stars[a], cb = !!S.stars[b];
           const both = ca && cb;
           if (evEdges.has(i)) continue; // cut routes vanish (see hints below)
           if ((pass === 0) === both) continue; // faint edges first, then active ones
-          ctx.beginPath(); edgePath(a, b, G.edgeLen[i]);
+          ctx.beginPath(); lineBetween(a, b);
           if (lane) {
             ctx.setLineDash([2, 5]);
             ctx.strokeStyle = both ? 'rgba(143,180,255,.38)' : (ca || cb) ? 'rgba(143,180,255,.14)' : 'rgba(143,180,255,.05)';
@@ -258,7 +292,7 @@
         const ev = S.events.find(x => x.id === ui.redraw.id);
         if (ev) {
           ctx.setLineDash([4, 5]); ctx.strokeStyle = 'rgba(255,190,120,.55)'; ctx.lineWidth = 1.4;
-          for (const e of ev.edges) if (!ev.restored.includes(e)) { ctx.beginPath(); edgePath(E[e][0], E[e][1], G.edgeLen[e]); ctx.stroke(); }
+          for (const e of ev.edges) if (!ev.restored.includes(e)) { ctx.beginPath(); lineBetween(E[e][0], E[e][1]); ctx.stroke(); }
           ctx.setLineDash([]);
         }
       }
@@ -266,9 +300,7 @@
       for (const f of ui.flashes) {
         const age = (t - f.t) / 900; if (age > 1) continue;
         ctx.strokeStyle = f.ok ? 'rgba(126,226,168,' + (1 - age).toFixed(2) + ')' : 'rgba(255,120,120,' + (1 - age).toFixed(2) + ')';
-        ctx.lineWidth = 3.2 * (1 - age) + 1; ctx.beginPath();
-        proj(sv[f.a], tmp); const x1 = tmp.x, y1 = tmp.y; proj(sv[f.b], tmp);
-        ctx.moveTo(x1, y1); ctx.lineTo(tmp.x, tmp.y); ctx.stroke();
+        ctx.lineWidth = 3.2 * (1 - age) + 1; ctx.beginPath(); lineBetween(f.a, f.b); ctx.stroke();
       }
 
       // messier objects
@@ -315,11 +347,6 @@
           ctx.strokeStyle = 'rgba(143,180,255,' + (0.25 + 0.3 * pulse).toFixed(2) + ')'; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.arc(x, y, r + 4 + pulse * 1.5, 0, TAU); ctx.stroke();
         }
-        if (G.wonderAt.has(i)) { // diamond marker for wonders
-          const done = !!S.wonderDone[i];
-          ctx.strokeStyle = done ? 'rgba(255,217,138,.95)' : 'rgba(255,217,138,.4)'; ctx.lineWidth = 1;
-          const q = r + 8; ctx.beginPath(); ctx.moveTo(x, y - q); ctx.lineTo(x + q, y); ctx.lineTo(x, y + q); ctx.lineTo(x - q, y); ctx.closePath(); ctx.stroke();
-        }
         if (evHot.has(i)) {
           const pulse = 0.5 + 0.5 * Math.sin(t / 220);
           ctx.strokeStyle = 'rgba(127,227,255,' + (0.55 + 0.4 * pulse).toFixed(2) + ')'; ctx.lineWidth = 2;
@@ -327,22 +354,22 @@
         }
         if (ui.redraw && ui.redraw.from === i) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 5, 0, TAU); ctx.stroke(); }
         if (ui.sel && ui.sel.type === 'star' && ui.sel.i === i) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(x, y, r + 9, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
-        // labels
-        const showLabel = (claimed && (v.zoom > 0.9 || st[7])) && (v.zoom > 2.2 || st[7] || mag < 2.5) || (!claimed && (v.zoom > 4.5 || (st[7] && mag < 2.2 && v.zoom > 1.9)));
-        if (showLabel) text(st[6], x + r + 4, y + 4, claimed ? 11.5 : 10.5, claimed ? 'rgba(235,240,255,.92)' : 'rgba(170,185,230,.55)');
+        // labels: proper names for the important stars, official designations when zoomed in
+        const showLabel = st[7] ? v.zoom > 0.85 : claimed ? v.zoom > 2.4 : v.zoom > 5;
+        if (showLabel) text(st[6], x + r + 4, y + 4, st[7] ? 12 : 10.5, claimed || st[7] ? 'rgba(235,240,255,.92)' : 'rgba(170,185,230,.55)', 'left', st[7] ? '500' : '');
       }
 
-      // fleets
+      // fleets (drawn on the nearest world copy)
       for (const f of S.fleets) {
-        const a = sv[f.from], b = f.kind === 's' ? sv[f.to] : mv[f.to];
-        const p = slerp(a, b, Math.max(0, Math.min(1, 1 - f.remaining / f.dur)));
-        proj(p, tmp); if (!tmp.vis) continue;
-        const q = slerp(a, b, Math.max(0, 1 - f.remaining / f.dur - 0.02)); const x0 = tmp.x, y0 = tmp.y; proj(q, tmp);
-        ctx.strokeStyle = 'rgba(255,217,138,.5)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(tmp.x, tmp.y); ctx.lineTo(x0, y0); ctx.stroke();
-        ctx.fillStyle = f.kind === 'm' ? '#7fe3ff' : '#ffd98a'; ctx.beginPath(); ctx.arc(x0, y0, 3.2, 0, TAU); ctx.fill();
-        // path preview
+        const ra1 = sra[f.from], Y1 = sY[f.from];
+        const toRa = f.kind === 's' ? sra[f.to] : mra[f.to], toY = f.kind === 's' ? sY[f.to] : mY[f.to];
+        const dR = wrap(toRa - ra1), frac = Math.max(0, Math.min(1, 1 - f.remaining / f.dur));
+        const pos = k => ({ x: px(ra1) - dR * k * scale, y: py(Y1 + (toY - Y1) * k) });
+        const p = pos(frac), q = pos(Math.max(0, frac - 0.03)), e = pos(1);
+        ctx.strokeStyle = 'rgba(255,217,138,.5)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+        ctx.fillStyle = f.kind === 'm' ? '#7fe3ff' : '#ffd98a'; ctx.beginPath(); ctx.arc(p.x, p.y, 3.2, 0, TAU); ctx.fill();
         ctx.strokeStyle = 'rgba(255,217,138,.18)'; ctx.setLineDash([3, 4]); ctx.lineWidth = 1; ctx.beginPath();
-        proj(p, tmp); const px = tmp.x, py = tmp.y; ctx.moveTo(px, py); proj(b, tmp); ctx.lineTo(tmp.x, tmp.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.moveTo(p.x, p.y); ctx.lineTo(e.x, e.y); ctx.stroke(); ctx.setLineDash([]);
       }
       // queued orders
       ctx.setLineDash([2, 4]);
@@ -354,26 +381,31 @@
       ctx.setLineDash([]);
     }
 
-    function visibleMid() { return { ra: v.ra0, dec: v.dec0, zoom: v.zoom }; }
+    function fitTo(raList, YList, zoomMax) {
+      const c = meanRA(raList);
+      let ex = 0.02, ey = 0.02, ym = 0;
+      raList.forEach((r, k) => { ex = Math.max(ex, Math.abs(wrap(r - c))); ym += YList[k]; });
+      ym /= YList.length;
+      YList.forEach(Y => { ey = Math.max(ey, Math.abs(Y - ym)); });
+      const z = Math.min((W * 0.36) / (ex * baseScale()), (H * 0.36) / (ey * baseScale()));
+      return { ra: ((c / RAD) + 360) % 360, y: ym, zoom: Math.max(0.8, Math.min(zoomMax || 8, z)) };
+    }
     return {
-      v, resize, render, pick, goTo, zoomBy: f => { v.zoom *= f; clampView(); },
+      v, resize, render, pick, goTo, zoomBy: f => { v.zoom *= f; clampView(); anim = null; },
       goStar(i, zoom) { const s = SKY.stars[i]; goTo(s[1], s[2], zoom || Math.max(v.zoom, 3.2)); },
       goConst(c) {
-        const cs = SKY.consts[c], pts = cs.stars.map(i => sv[i]);
-        let m = [0, 0, 0]; pts.forEach(p => { m[0] += p[0]; m[1] += p[1]; m[2] += p[2]; });
-        const L = Math.hypot(m[0], m[1], m[2]) || 1; m = m.map(x => x / L);
-        let ext = 1; pts.forEach(p => { ext = Math.max(ext, Math.acos(Math.min(1, p[0] * m[0] + p[1] * m[1] + p[2] * m[2])) / RAD); });
-        const ra = ((Math.atan2(m[1], m[0]) / RAD) + 360) % 360, dec = Math.asin(m[2]) / RAD;
-        goTo(ra, dec, Math.max(0.8, Math.min(8, 52 / (ext + 8))));
+        const ids = SKY.consts[c].stars;
+        const f = fitTo(ids.map(i => sra[i]), ids.map(i => sY[i]));
+        anim = { t0: performance.now(), ms: 700, from: { x0: v.x0, y0: v.y0, zoom: v.zoom }, to: { x0: f.ra * RAD, y0: f.y, zoom: f.zoom } };
+        anim.to.x0 = anim.from.x0 + wrap(anim.to.x0 - anim.from.x0);
       },
       goMessier(i) { const m = SKY.messier[i]; goTo(m.ra, m.dec, Math.max(v.zoom, 3.2)); },
       screenOf(i) { return { x: sx[i], y: sy[i], vis: svis[i] }; },
-      setView(ra, dec, zoom) { v.ra0 = ra; v.dec0 = dec; v.zoom = zoom; clampView(); },
-      visibleMid,
+      setView(ra, dec, zoom) { v.x0 = ra * RAD; v.y0 = millerY(dec); v.zoom = zoom; clampView(); },
     };
   }
 
-  // ---- mini chart for codex cards and the constellation page
+  // ---- mini chart for codex cards and the constellation page (same projection as the map)
   function drawChart(canvas, G, c, opts) {
     opts = opts || {};
     const SKY = G.SKY, S = G.state;
@@ -388,21 +420,15 @@
     const edges = [];
     SKY.edges.forEach((e, i) => { if (e[2] === c) { edges.push(i); own.add(e[0]); own.add(e[1]); } });
     const ids = [...own];
-    let m = [0, 0, 0];
-    ids.forEach(i => { const p = vec(SKY.stars[i][1], SKY.stars[i][2]); m[0] += p[0]; m[1] += p[1]; m[2] += p[2]; });
-    const L = Math.hypot(m[0], m[1], m[2]) || 1; m = m.map(x => x / L);
-    const ra = ((Math.atan2(m[1], m[0]) / RAD) + 360) % 360, dec = Math.asin(m[2]) / RAD;
-    const Bs = basis(ra, dec);
+    const rc = meanRA(ids.map(i => SKY.stars[i][1] * RAD));
     const pts = new Map();
     let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
     ids.forEach(i => {
-      const p = vec(SKY.stars[i][1], SKY.stars[i][2]);
-      const cosc = p[0] * Bs.c[0] + p[1] * Bs.c[1] + p[2] * Bs.c[2], k = 2 / (1 + cosc);
-      const x = -k * (p[0] * Bs.e[0] + p[1] * Bs.e[1] + p[2] * Bs.e[2]), y = -k * (p[0] * Bs.n[0] + p[1] * Bs.n[1] + p[2] * Bs.n[2]);
+      const x = -wrap(SKY.stars[i][1] * RAD - rc), y = -millerY(SKY.stars[i][2]);
       pts.set(i, [x, y]); minx = Math.min(minx, x); maxx = Math.max(maxx, x); miny = Math.min(miny, y); maxy = Math.max(maxy, y);
     });
     const pad = opts.big ? 38 : 12;
-    const sc = Math.min((W - 2 * pad) / Math.max(1e-6, maxx - minx), (H - 2 * pad) / Math.max(1e-6, maxy - miny), opts.big ? 1e9 : 1e9);
+    const sc = Math.min((W - 2 * pad) / Math.max(1e-6, maxx - minx), (H - 2 * pad) / Math.max(1e-6, maxy - miny));
     const ox = W / 2 - ((minx + maxx) / 2) * sc, oy = H / 2 - ((miny + maxy) / 2) * sc;
     const P = i => { const p = pts.get(i); return [ox + p[0] * sc, oy + p[1] * sc]; };
     const dev = !!S.devConst[c], master = !!S.masterConst[c];
@@ -420,14 +446,13 @@
       ctx.fillStyle = cl ? 'rgb(' + rgb.join(',') + ')' : 'rgba(' + rgb.join(',') + ',.4)';
       ctx.beginPath(); ctx.arc(p[0], p[1], r, 0, TAU); ctx.fill();
       if (cl && opts.big) { ctx.strokeStyle = 'rgba(255,217,138,.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(p[0], p[1], r + 3, 0, TAU); ctx.stroke(); }
-      if (opts.big && (cl || opts.labelAll)) {
+      if (opts.big && (cl || st[7])) {
         ctx.font = '11px system-ui, sans-serif'; ctx.textAlign = 'left';
-        ctx.fillStyle = 'rgba(235,240,255,.9)'; ctx.fillText(st[6], p[0] + r + 4, p[1] + 4);
+        ctx.fillStyle = cl ? 'rgba(235,240,255,.9)' : 'rgba(170,185,230,.6)'; ctx.fillText(st[6], p[0] + r + 4, p[1] + 4);
       }
     });
-    if (opts.hit) opts.hit.length = 0;
-    if (opts.hit) ids.forEach(i => { const p = P(i); opts.hit.push({ i, x: p[0], y: p[1] }); });
+    if (opts.hit) { opts.hit.length = 0; ids.forEach(i => { const p = P(i); opts.hit.push({ i, x: p[0], y: p[1] }); }); }
   }
 
-  window.Sky = { create, drawChart, bvRGB, vec, slerp };
+  window.Sky = { create, drawChart, bvRGB };
 })();

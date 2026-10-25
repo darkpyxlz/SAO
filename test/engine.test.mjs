@@ -29,10 +29,11 @@ test('graph is connected', () => {
   assert.equal(seen.size, SKY.stars.length);
 });
 
-test('every wonder name resolves to a star', () => {
-  const G = mk();
-  for (const n of Object.keys(G.WONDERS)) assert.ok(G.nameIdx.has(n), n);
-  for (const s of G.wonderSets) assert.equal(s.idx.length, s.stars.length, s.id);
+test('only important stars keep proper names; the rest use official designations', () => {
+  const named = SKY.stars.filter(s => s[7]);
+  assert.ok(named.length >= 30 && named.length <= 80, 'named: ' + named.length);
+  named.forEach(s => assert.ok(s[3] <= 2.0 || ['Polaris', 'Algol', 'Mira', 'Thuban', 'Albireo', 'Mizar', 'Sadr'].includes(s[6]), s[6]));
+  SKY.stars.filter(s => !s[7]).forEach(s => assert.match(s[6], /^([\u03b1-\u03c9]\S* [A-Za-z]{2,3}|\d+ [A-Za-z]{2,3}|[A-Z]{1,2}\d* [A-Za-z]{2,3}|V\d+ [A-Za-z]{2,3}|HD \d+|HIP \d+)$/, s[6]));
 });
 
 test('stars accrue up to the stockpile cap', () => {
@@ -163,17 +164,23 @@ test('save round-trips', () => {
   assert.equal(H.d.count, 1);
 });
 
-test('wonder project: needs observatory, completes into full perk', () => {
+test('old v1 saves migrate (wonder fields are dropped)', () => {
+  const G = mk();
+  const old = JSON.parse(G.serialize());
+  old.version = 1; old.projects = [{ star: 0, remaining: 5, dur: 10 }]; old.wonderDone = { 3: 1 };
+  const H = Engine.create(SKY);
+  H.load(old);
+  assert.equal(H.state.version, 2);
+  assert.equal(H.state.projects, undefined);
+  H.catchUp(100);
+});
+
+test('no unique powers: only Messier objects change global modifiers', () => {
   const G = mk('Sirius');
-  const h = G.state.home;
-  G.state.insight = 1e4; G.state.starlight = 1e7;
-  assert.ok(!G.startWonder(h).ok);
-  G.upgrade(h, 'o');
-  const half = G.d.P.out;
-  assert.ok(G.startWonder(h).ok);
-  G.catchUp(G.CFG.wonderSeconds + 1);
-  assert.ok(G.state.wonderDone[h]);
-  assert.ok(G.d.P.out > half);
+  assert.deepEqual(G.d.P, { out: 0, speed: 0, slots: 0, ins: 0, cost: 0, cap: 0, ev: 0 });
+  for (const n of ['Aldebaran', 'Regulus', 'Antares', 'Fomalhaut']) G.state.stars[G.nameIdx.get(n)] = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0 };
+  G.recalc();
+  assert.equal(G.d.P.out, 0, 'no Royal Stars bonus');
 });
 
 test('pacing sketch: a played-through economy keeps growing', () => {
