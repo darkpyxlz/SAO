@@ -28,8 +28,8 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
 - **Technology**: a 22-project tree of real human technology, from the refracting telescope (1608) through
   electric power, rockets, computers, solar cells, space stations, the internet, reusable rockets, fusion and
   space elevators to Dyson swarms and the warp drive. One project at a time, in real time (10 minutes for the
-  first, up to 48 hours for the last), and it keeps running while you are away. Each costs cash and research
-  points, unlocks buildings and most give a company-wide bonus.
+  first, up to 3 days for the last, about two weeks for the whole tree), and it keeps running while you are
+  away. Each costs cash and research points, unlocks buildings and most give a company-wide bonus.
 - **Buildings**: every three development levels open one building slot at a colony (the rings around the star;
   every building is drawn as a little satellite). 14 buildings, each up to level 3: Observatory, Commodity
   Exchange, Launch Pad, Solar Farm, Clearing House, Orbital Shipyard, Space Station (more slots), R&D Campus,
