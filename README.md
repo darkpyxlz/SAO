@@ -34,7 +34,7 @@ name, or HD / HIP catalogue number.
 - **Petitions**: stars sometimes ask for an upgrade, an expansion or a visit, and reward you for it.
 
 Progress autosaves to `localStorage`, with three manual slots and JSON export/import (Menu).
-Time away is simulated when you come back (production up to each stockpile cap, fleets, wonder projects).
+Time away is simulated when you come back (production up to each stockpile cap, fleets and expeditions).
 
 ## Running and developing
 
@@ -47,7 +47,7 @@ npm test             # engine tests: data integrity, economy pacing sketch, even
 
 | File | Purpose |
 |---|---|
-| `js/engine.js` | Pure game logic (no DOM). Costs, rates, fleets, orders, events, wonders, saves. |
+| `js/engine.js` | Pure game logic (no DOM). Costs, rates, fleets, orders, events, saves. |
 | `js/sky.js` | Flat wrapping map renderer (Miller projection), pan/zoom/pick, codex mini-charts. |
 | `js/ui.js` | Start screen, HUD, panels, Codex, redraw mode, saves, main loop. |
 | `js/data.js` | Generated sky data (do not edit by hand). |
