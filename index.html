@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#05070f">
+<title>Firmament</title>
+<meta name="description" content="An incremental empire game on the real night sky: claim every star, connect trade routes, catalogue the Messier objects and develop all 88 constellations.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2305070f'/%3E%3Cpath d='M16 5l2.7 8.3H27l-6.8 5 2.6 8.2L16 21.6 9.2 26.5l2.6-8.2L5 13.3h8.3z' fill='%23ffd98a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="sky" aria-label="Star chart"></canvas>
+
+<header id="hud" hidden>
+  <div class="res" title="Starlight: the main currency">
+    <span class="ico gold">✦</span><b id="r-star">0</b><small id="r-star-rate"></small>
+  </div>
+  <div class="res" title="Insight: gathered by Observatories, spent on Messier expeditions and wonders">
+    <span class="ico cyan">◉</span><b id="r-ins">0</b><small id="r-ins-rate"></small>
+  </div>
+  <div class="res" data-act="open-fleets" style="cursor:pointer" title="Fleets in flight / fleet slots. Click for details">
+    <span class="ico">➤</span><b id="r-fleet">0/3</b><small id="r-queue"></small>
+  </div>
+  <div class="grow"></div>
+  <button class="btn" data-act="open-codex" title="Codex: constellations, Messier objects, named stars">Codex</button>
+  <button class="btn ghost" data-act="open-menu" aria-label="Menu">☰</button>
+</header>
+
+<div id="banner" hidden></div>
+<div id="attn" hidden></div>
+<aside id="panel" hidden></aside>
+<div id="toasts" aria-live="polite"></div>
+<div id="tooltip" hidden></div>
+
+<div id="zoomctl" hidden>
+  <button class="btn ghost" data-act="zoom-in" aria-label="Zoom in">+</button>
+  <button class="btn ghost" data-act="zoom-out" aria-label="Zoom out">−</button>
+  <button class="btn ghost" data-act="go-home" aria-label="Centre on home star" title="Home">⌂</button>
+</div>
+
+<div id="modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet-head"><h2 id="modal-title"></h2><button class="btn ghost" data-act="close-modal" aria-label="Close">✕</button></div>
+    <div id="modal-tabs"></div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="start" hidden></div>
+<noscript><p style="padding:2rem;color:#fff">Firmament needs JavaScript.</p></noscript>
+
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/sky.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>
