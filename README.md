@@ -74,6 +74,28 @@ simulated when you come back (revenue up to each storage cap, colony ships, surv
 Saves from earlier versions (Starlight, Insight and hubs) are converted: hubs become the matching buildings and
 unlock the technology they need.
 
+## Keyboard shortcuts
+
+Everything has a key (shown on the buttons, hidden on touch screens; **?** opens the full list in Menu → Keys).
+Keys are ignored while you type in a text box, and window keys toggle (press again to close).
+
+| Key | Does |
+|---|---|
+| `C` `Q` `S` `O` `T` `B` `F` | Codex, Quests, Sky School, Corporation overview, Technology, Buildings catalogue, Fleets |
+| `Esc` | Close the window, finish redrawing, deselect; with nothing to close it opens the menu |
+| `Space` | **Expand**: send a colony ship to the selected star, survey the selected Messier object (then study it in depth), or otherwise send a ship to the best-paying new star (next to the selected colony if one is selected). It never queues a charter on its own: with every ship out it asks you to pick a star |
+| `Shift` `Space` | Send a ship to the best new star for every idle ship |
+| `N` / `M` / `G` / `P` | Jump to the next new star to colonise / Messier object to survey / colony with full storage (fullest first) / petition. `Shift` goes backwards |
+| `H` | Headquarters (while redrawing: show hints) |
+| `R` | Collect revenue at the selected colony (`Shift` `R`: the whole constellation once developed) |
+| `I` `L` `D` | Develop Industry, Logistics, R&D at the selected colony |
+| `1`…`9` `0` | Build or upgrade the numbered building in the selected colony's panel (the number is on its button) |
+| `E` | Redraw the routes cut by a comet or nova |
+| Arrows, `+` `-` | Pan (hold `Shift` for faster) and zoom the map, smoothly while held |
+| `←` `→`, digits | In windows: switch tabs; Codex and Menu: `1`…`5` jump to a tab; Corporation → Technology: `1`…`9` start the numbered project |
+| `Enter` | Quests: claim everything that is ready |
+| `1`…`4`, `A`…`D`, `Space`, `R`, `⌫` | Sky School: start a round, answer, next question / another round, review what is due, back |
+
 ## Pace
 
 Slowed down by about 2× since the first version, with quizzes nerfed. Roughly: a casual player visiting three
@@ -99,7 +121,7 @@ npm test             # engine tests: data integrity, economy, buildings, tech, e
 | `js/pics.js` | Messier pictures: loads `img/messier/` photos, with procedural illustrations as placeholder/fallback. |
 | `img/messier/` | 110 resized Messier photographs (provenance in THIRD_PARTY.md). |
 | `js/sky.js` | Flat wrapping map renderer (Miller projection), pan/zoom/pick, codex mini-charts. |
-| `js/ui.js` | Start screen, HUD, panels, corporation, Codex, redraw mode, saves, main loop. |
+| `js/ui.js` | Start screen, HUD, panels, corporation, Codex, redraw mode, keyboard shortcuts, saves, main loop. |
 | `js/data.js` | Generated sky data (do not edit by hand). |
 | `data/lore.json` | Constellation and Messier text, Messier→constellation table. |
 | `scripts/build-data.mjs` | Regenerates `js/data.js` from the d3-celestial data files. |

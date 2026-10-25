@@ -669,3 +669,61 @@ test('saves from v2 (before hubs and quests) load and gain the new fields', () =
   assert.equal(H.state.cash, 5);
   H.catchUp(100);
 });
+
+test('shortcut helpers: expansion targets, Messier targets and numbered building rows', () => {
+  const G = mk();
+  const home = G.state.home, S = G.state;
+  G.state.cash = 1e6; G.state.research = 1e6;
+  // expansion targets: unclaimed neighbours of colonies, best-paying first, never claimed or already bound for
+  let t = G.expansionTargets();
+  assert.ok(t.length > 0);
+  assert.ok(t.every(x => !S.stars[x]));
+  for (let k = 1; k < t.length; k++) assert.ok(G.baseRate[t[k - 1]] >= G.baseRate[t[k]], 'sorted by base revenue');
+  assert.deepEqual(new Set(t), G.frontier(), 'with no ships out these are exactly the frontier');
+  const best = t[0];
+  assert.ok(G.launch(best).ok);
+  t = G.expansionTargets();
+  assert.ok(!t.includes(best), 'a star with a ship bound for it is not offered again');
+  // stars next to a pending target can be chained
+  const beyond = G.adj[best].map(n => n.to).filter(x => !S.stars[x] && x !== home);
+  assert.ok(beyond.length === 0 || beyond.every(x => t.includes(x)), 'neighbours of a destination are offered');
+  // "near" prefers the neighbours of one colony and falls back to everything
+  assert.ok(G.expansionTargets(home).every(x => G.adj[home].some(n => n.to === x)));
+  G.catchUp(2000);
+  const a = Object.keys(S.stars).map(Number).find(i => i !== home);
+  const mine = G.expansionTargets(a);
+  assert.ok(mine.length > 0);
+  // Messier targets: within reach, unsurveyed, brightest first
+  const ms = G.messierTargets();
+  ms.forEach(m => { assert.ok(!S.messier[m]); assert.ok(G.messierAccess(m).length > 0); });
+  for (let k = 1; k < ms.length; k++) assert.ok(SKY.messier[ms[k - 1]].mag <= SKY.messier[ms[k]].mag);
+  if (ms.length) { assert.ok(G.visitMessier(ms[0]).ok); G.catchUp(5000); assert.ok(!G.messierTargets().includes(ms[0])); }
+  // building rows: nothing without a slot; then upgrades of what stands, then buildable ones in catalogue order
+  assert.deepEqual(G.buildOptions(home), []);
+  for (const tr of ['r', 'b', 'o']) G.upgrade(home, tr);
+  assert.equal(G.slotsAt(home), 1);
+  let rows = G.buildOptions(home);
+  assert.ok(rows.length > 0 && rows.every(r => r.kind === 'build'));
+  assert.ok(rows.every(r => S.tech.done[G.BUILDINGS[r.id].tech]), 'only unlocked buildings');
+  assert.equal(rows[0].id, 'observatory');
+  const order = Object.keys(G.BUILDINGS);
+  for (let k = 1; k < rows.length; k++) assert.ok(order.indexOf(rows[k - 1].id) < order.indexOf(rows[k].id), 'catalogue order');
+  assert.ok(G.build(home, 'observatory').ok);
+  rows = G.buildOptions(home);
+  assert.deepEqual(rows[0], { id: 'observatory', kind: 'upgrade' }, 'upgrades come first');
+  assert.ok(!rows.some(r => r.kind === 'build' && r.id === 'observatory'));
+  assert.ok(G.build(home, 'observatory').ok); assert.ok(G.build(home, 'observatory').ok);
+  assert.ok(!G.buildOptions(home).some(r => r.id === 'observatory'), 'a fully built building has no row');
+  assert.deepEqual(G.buildOptions(999999), [], 'unknown or unowned stars have no rows');
+});
+
+test('attention lists the fullest storage first', () => {
+  const G = mk();
+  G.state.cash = 1e6;
+  for (let k = 0; k < 4; k++) { const t = G.expansionTargets()[0]; assert.ok(G.launch(t).ok); G.catchUp(3000); }
+  G.tick(1e6, false);
+  const full = G.attention();
+  assert.ok(full.length >= 3);
+  for (let k = 1; k < full.length; k++) assert.ok(full[k - 1].cash >= full[k].cash);
+  assert.ok(full.every(f => f.why === 'full'));
+});

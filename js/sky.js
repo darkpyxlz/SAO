@@ -439,6 +439,7 @@
     }
     return {
       v, resize, render, pick, goTo, zoomBy: f => { v.zoom *= f; clampView(); anim = null; },
+      pan: (dx, dy) => panPx(dx, dy), // move the map by (dx, dy) pixels, as if dragged
       goStar(i, zoom) { const s = SKY.stars[i]; goTo(s[1], s[2], zoom || Math.max(v.zoom, 3.2), 0, true); },
       goConst(c) {
         const ids = SKY.consts[c].stars;

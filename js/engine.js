@@ -887,13 +887,38 @@
       for (const i of D.claimed) for (const n of adj[i]) if (!S.stars[n.to]) out.add(n.to);
       return out;
     }
-    function attention() { // stars worth a visit
+    function attention() { // stars worth a visit, the most cash waiting first
       const out = [];
       for (const i of D.claimed) {
         const s = S.stars[i];
         const cap = stockCap(i);
-        if (cap > 0 && s.s >= cap * 0.9) out.push({ star: i, why: 'full' });
+        if (cap > 0 && s.s >= cap * 0.9) out.push({ star: i, why: 'full', cash: s.s });
       }
+      return out.sort((a, b) => b.cash - a.cash || a.star - b.star);
+    }
+
+    // ---- ordered lists shared by the panels and the keyboard shortcuts, so a key always does what the row it names does
+    function expansionTargets(near) { // unclaimed stars a colony ship could be sent to (next to a colony or to a ship's destination), best-paying first
+      const pend = targetsPending(), cand = new Set();
+      for (const i of D.claimed) for (const n of adj[i]) if (!S.stars[n.to] && !pend.has(n.to)) cand.add(n.to);
+      for (const p of pend) for (const n of adj[p]) if (!S.stars[n.to] && !pend.has(n.to)) cand.add(n.to);
+      let list = [...cand];
+      if (near !== undefined && S.stars[near]) { // prefer the selected colony's own neighbours when it has any
+        const mine = list.filter(t => adj[near].some(n => n.to === t));
+        if (mine.length) list = mine;
+      }
+      return list.sort((a, b) => baseRate[b] - baseRate[a] || a - b);
+    }
+    function messierTargets() { // Messier objects in reach that are not yet surveyed, brightest first
+      const out = [];
+      for (let m = 0; m < NM; m++) if (!S.messier[m] && messierAccess(m).length) out.push(m);
+      return out.sort((a, b) => SKY.messier[a].mag - SKY.messier[b].mag || a - b);
+    }
+    function buildOptions(i) { // a colony's numbered building rows: upgrades of what stands, then what could be built in a slot
+      const out = [];
+      if (!S.stars[i]) return out;
+      for (const b of buildingsAt(i)) if (BUILDINGS[b.id] && b.lvl < BUILDING_MAX) out.push({ id: b.id, kind: 'upgrade' });
+      if (slotsAt(i) > 0) for (const id of Object.keys(BUILDINGS)) if (!buildingAt(i, id) && S.tech.done[BUILDINGS[id].tech]) out.push({ id, kind: 'build' });
       return out;
     }
     function messierStats() {
@@ -913,7 +938,7 @@
       techStatus, techCost, canStartTech, startTech, techCount, surveyText, rankInfo, valuation, priceTarget, setCorpName,
       routeLevel, routeUpgradeCost, canUpgradeRoute, upgradeRoute, laneCost, canBuildLane, buildLane, buildableLanes, edgeActive, isBuildable,
       spawnEvent, redraw, useHint, eventReward, dismissPetition, addPetition,
-      consStatus, frontier, attention, messierStats, lvl, fmt, sepDeg,
+      consStatus, frontier, attention, expansionTargets, messierTargets, buildOptions, messierStats, lvl, fmt, sepDeg,
       serialize() { S.saved = nowFn(); return JSON.stringify(S); },
     };
   }

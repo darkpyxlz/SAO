@@ -8,7 +8,7 @@
   const AUTOSAVE = 'firmament.autosave.v1';
   const SLOT = n => 'firmament.slot' + n + '.v1';
 
-  const ui = { lastReady: 0, lastTech: null, sel: null, redraw: null, hint: false, flashes: [], frontier: new Set(), started: false, modal: null, tab: null, filter: {}, lastLog: 0 };
+  const ui = { lastReady: 0, lastTech: null, sel: null, redraw: null, hint: false, flashes: [], frontier: new Set(), started: false, modal: null, tab: null, filter: {}, lastLog: 0, held: new Map(), fast: false };
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = n => G.fmt(n);
   const money = n => '$' + fmt(n);
@@ -30,6 +30,10 @@
   const KIND_ICON = { globular: '⊕', open: '⁘', nebula: '▣', galaxy: '◯', other: '◇' };
   const ticker = name => (String(name).split(/\s+/).filter(w => /^[A-Za-zͰ-Ͽ]/.test(w)).map(w => w[0]).join('').toUpperCase() || 'FRM').slice(0, 4);
   const bico = def => '<span class="bico" style="--c:' + def.color + '" title="' + esc(def.name) + '">' + def.short + '</span>';
+  // key badges next to buttons ("Collect revenue [R]"); hidden on touch screens
+  const kb = k => '<kbd class="k k-only">' + k + '</kbd>';
+  const keyLabel = n => (n >= 0 && n < 10 ? String((n + 1) % 10) : ''); // list row n (0-based) -> its number key: 1..9 then 0
+  const kbRow = n => (keyLabel(n) ? kb(keyLabel(n)) : '');
 
   const QZ = Quiz.create(G);
   const QU = Quests.create(G);
@@ -127,7 +131,7 @@
     const auto = readKey(AUTOSAVE);
     let h = '<div class="inner"><h1>Firmament</h1><p class="tag">Found a space corporation and colonise the whole night sky. Colony ships cross the real constellations, colonies earn cash, human technology from the telescope to the warp drive unlocks new buildings, and every constellation and Messier object you complete is catalogued for good.</p>';
     if (auto) {
-      h += '<div class="slot" style="max-width:600px"><div class="grow"><b>Continue your corporation</b><div class="muted tiny">' + esc(summary(auto)) + '</div></div><button class="btn primary" data-act="continue">Continue</button></div><p></p>';
+      h += '<div class="slot" style="max-width:600px"><div class="grow"><b>Continue your corporation</b><div class="muted tiny">' + esc(summary(auto)) + '</div></div><button class="btn primary" data-act="continue">Continue' + kb('Enter') + '</button></div><p></p>';
     }
     h += '<h3>' + (auto ? 'Or found a new company' : 'Found your company') + '</h3>';
     h += '<div class="row" style="max-width:420px"><label class="muted" for="corp-input">Company name</label><input id="corp-input" class="txt grow" maxlength="32" value="' + esc(START_NAMES[Math.floor(Math.random() * START_NAMES.length)]) + '"></div>';
@@ -138,13 +142,13 @@
       h += '<button class="home" data-act="newgame" data-i="' + i + '"><b><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(name) + '</b> <span class="muted tiny">' + esc(SKY.consts[st[5]].name) + ' · mag ' + st[3].toFixed(2) + '</span><small>' + esc(txt) + '</small></button>';
     }
     h += '</div><p><label class="btn small">Import a save file<input type="file" accept=".json,application/json" id="imp-start" hidden></label></p>';
-    h += '<ul class="how"><li>Every colony earns <b class="gold">cash</b>, which waits in storage until you collect it.</li><li>Spend cash on colony ships to expand along constellation lines and hyperlanes.</li><li>Research technology (<b class="cyan">◉ research points</b>) to unlock real-world-inspired buildings: telescopes, launch pads, fusion plants, Dyson swarms.</li><li>Neighbouring colonies of different colours boost each other through trade routes.</li><li>Comets and novae cut routes. Redraw them from memory for a bonus.</li><li>Your progress saves in this browser. Menu → Export keeps a backup.</li></ul></div>';
+    h += '<ul class="how"><li>Every colony earns <b class="gold">cash</b>, which waits in storage until you collect it.</li><li>Spend cash on colony ships to expand along constellation lines and hyperlanes.</li><li>Research technology (<b class="cyan">◉ research points</b>) to unlock real-world-inspired buildings: telescopes, launch pads, fusion plants, Dyson swarms.</li><li>Neighbouring colonies of different colours boost each other through trade routes.</li><li>Comets and novae cut routes. Redraw them from memory for a bonus.</li><li>Your progress saves in this browser. Menu → Export keeps a backup.</li><li class="k-only">On a keyboard? Space expands, C opens the codex, and ? lists every shortcut.</li></ul></div>';
     el.innerHTML = h;
     const imp = $('#imp-start');
     if (imp) imp.onchange = e => { if (e.target.files[0]) importFile(e.target.files[0], st => beginSession(st, false)); };
   }
   function showIntro() {
-    toast('Welcome, CEO. Your HQ is already earning: tap it to collect revenue, then colonise a neighbouring star.', 'gold');
+    toast('Welcome, CEO. Your HQ is already earning: tap it to collect revenue, then colonise a neighbouring star.' + (matchMedia('(hover: hover) and (pointer: fine)').matches ? ' Press ? for keyboard shortcuts.' : ''), 'gold');
     ui.sel = { type: 'star', i: G.state.home };
   }
 
@@ -244,13 +248,14 @@
   }
   function buildingSection(i) {
     const S = G.state, list = G.buildingsAt(i), slots = G.slotsAt(i);
+    const rowNo = new Map(); G.buildOptions(i).forEach((r, k) => rowNo.set(r.kind + ':' + r.id, k)); // the number keys act on these rows
     let h = '<div class="p-sec"><h4>Buildings <span class="muted">· ' + list.length + ' / ' + slots + ' slots</span></h4>';
     if (!slots) h += '<div class="muted tiny">Develop this colony to 3 levels to open its first building slot. Every further 3 levels opens another (the rings around the star).</div>';
     for (const b of list) {
       const def = G.BUILDINGS[b.id], sum = G.buildingSummary(i, b.id), c = G.buildingCost(i, b.id), chk = c ? G.canBuild(i, b.id) : null;
       h += '<div class="bld"><div class="row">' + bico(def) + '<b class="grow">' + esc(def.name) + '</b><span class="badge">Lv ' + b.lvl + ' / ' + G.BUILDING_MAX + '</span></div>';
       h += '<div class="tiny">' + esc(sum.text) + (sum.regional ? ' <span class="muted">(reaches ' + sum.covered + ' colon' + (sum.covered === 1 ? 'y' : 'ies') + ' now)</span>' : '') + '</div>';
-      h += '<div class="row tiny">' + (c ? '<span class="gold">' + money(c.cash) + '</span>' + (c.research ? '<span class="cyan">' + rp(c.research) + '</span>' : '') + '<span class="grow"></span><button class="btn small primary" data-act="build" data-i="' + i + '" data-id="' + b.id + '"' + (chk.ok ? '' : ' disabled') + '>Upgrade to Lv ' + c.next + '</button>' : '<span class="grow muted">Fully built</span>') + '<button class="btn small ghost" title="Demolish for a 50% refund" data-act="demolish" data-i="' + i + '" data-id="' + b.id + '">✕</button></div>';
+      h += '<div class="row tiny">' + (c ? '<span class="gold">' + money(c.cash) + '</span>' + (c.research ? '<span class="cyan">' + rp(c.research) + '</span>' : '') + '<span class="grow"></span><button class="btn small primary" data-act="build" data-i="' + i + '" data-id="' + b.id + '"' + (chk.ok ? '' : ' disabled') + '>Upgrade to Lv ' + c.next + kbRow(rowNo.get('upgrade:' + b.id)) + '</button>' : '<span class="grow muted">Fully built</span>') + '<button class="btn small ghost" title="Demolish for a 50% refund" data-act="demolish" data-i="' + i + '" data-id="' + b.id + '">✕</button></div>';
       if (c && !chk.ok) h += '<div class="muted tiny">' + esc(chk.msg) + '</div>';
       h += '</div>';
     }
@@ -261,7 +266,7 @@
       h += '<div class="muted tiny" style="margin:8px 0 4px">' + (free > 0 ? 'Build in a free slot:' : 'All slots are in use. Develop this colony further, or build a Space Station.') + '</div>';
       for (const id of avail) {
         const def = G.BUILDINGS[id], c = G.buildingCost(i, id), chk = G.canBuild(i, id);
-        h += '<div class="bopt"><div class="row">' + bico(def) + '<b class="grow">' + esc(def.name) + '</b><button class="btn small" data-act="build" data-i="' + i + '" data-id="' + id + '"' + (chk.ok ? '' : ' disabled') + '>Build</button></div><div class="muted tiny">' + esc(def.text(1)) + '</div><div class="row tiny"><span class="gold">' + money(c.cash) + '</span>' + (c.research ? '<span class="cyan">' + rp(c.research) + '</span>' : '') + '</div></div>';
+        h += '<div class="bopt"><div class="row">' + bico(def) + '<b class="grow">' + esc(def.name) + '</b><button class="btn small" data-act="build" data-i="' + i + '" data-id="' + id + '"' + (chk.ok ? '' : ' disabled') + '>Build' + kbRow(rowNo.get('build:' + id)) + '</button></div><div class="muted tiny">' + esc(def.text(1)) + '</div><div class="row tiny"><span class="gold">' + money(c.cash) + '</span>' + (c.research ? '<span class="cyan">' + rp(c.research) + '</span>' : '') + '</div></div>';
       }
     }
     if (locked) h += '<div class="muted tiny" style="margin-top:6px">' + locked + ' more building' + (locked === 1 ? '' : 's') + ' need technology: <span class="link" data-act="open-corp-tech">open the tech tree</span>.</div>';
@@ -291,7 +296,7 @@
         h += '<div class="row"><span class="l">Cost</span><span class="grow"></span><b class="' + (S.cash >= G.claimCost() ? 'gold' : 'bad') + '">' + money(G.claimCost()) + '</b></div>';
         if (origins.length) h += '<div class="row"><span class="l">Flight</span><span class="grow"></span><span>' + dur(origins[0].sec) + ' from ' + esc(SKY.stars[origins[0].o.from][6]) + '</span></div>';
         const flying = S.fleets.length >= D.slots;
-        h += '<div class="row"><button class="btn primary grow" data-act="launch" data-i="' + i + '"' + (chk.ok ? '' : ' disabled') + '>' + (flying ? 'Queue a charter' : 'Send colony ship') + '</button></div>';
+        h += '<div class="row"><button class="btn primary grow" data-act="launch" data-i="' + i + '"' + (chk.ok ? '' : ' disabled') + '>' + (flying ? 'Queue a charter' : 'Send colony ship') + kb('Space') + '</button></div>';
         if (!chk.ok) h += '<div class="muted tiny">' + esc(chk.msg) + '</div>';
         else if (flying) h += '<div class="muted tiny">All ' + D.slots + ' ships are out. The charter is paid now and sails when one is free.</div>';
       }
@@ -302,7 +307,7 @@
     const cap = G.stockCap(i), icap = G.resCap(i);
     h += '<div class="p-sec"><h4>Revenue</h4><div class="bar"><i data-lv="bar" style="width:0%"></i></div>';
     h += '<div class="row tiny"><span class="gold" data-lv="stock">$0</span><span class="muted" data-lv="cap"></span><span class="grow"></span>' + (icap > 0 ? '<span class="cyan" data-lv="res">◉ 0</span>' : '') + '</div>';
-    h += '<div class="row"><button class="btn gold grow" data-act="collect" data-i="' + i + '">Collect revenue</button></div>';
+    h += '<div class="row"><button class="btn gold grow" data-act="collect" data-i="' + i + '">Collect revenue' + kb('R') + '</button></div>';
     h += '<div class="row tiny muted"><span class="grow">Revenue</span><span data-lv="rate"></span></div>';
     h += '<div class="muted tiny" data-lv="rbreak"></div>';
     if (D.auto[i] > 0) h += '<div class="tiny cyan" style="margin-top:4px">⟳ ' + Math.round(D.auto[i] * 100) + '% of this colony’s revenue is banked automatically by a Clearing House.</div>';
@@ -316,7 +321,7 @@
       const cost = max ? 0 : G.upgradeCost(i, t);
       let pips = '<span class="pips">'; for (let k = 0; k < G.MAX_LEVEL; k++) pips += '<i class="' + (k < L ? 'on' : '') + '"></i>'; pips += '</span>';
       h += '<div class="row"><span style="width:84px"><b>' + info.name + '</b></span>' + pips + '<span class="grow"></span>' +
-        (max ? '<span class="badge gold">max</span>' : '<button class="btn small" data-act="upgrade" data-i="' + i + '" data-t="' + t + '"' + (S.cash >= cost ? '' : ' disabled') + '>' + money(cost) + '</button>') + '</div>';
+        (max ? '<span class="badge gold">max</span>' : '<button class="btn small" data-act="upgrade" data-i="' + i + '" data-t="' + t + '"' + (S.cash >= cost ? '' : ' disabled') + '>' + money(cost) + kb('ILD'[G.TRACKS.indexOf(t)]) + '</button>') + '</div>';
       h += '<div class="muted tiny" style="margin:-3px 0 4px 0">' + esc(info.desc) + '</div>';
     }
     const lv = s.r + s.b + s.o;
@@ -350,12 +355,12 @@
       const pend = S.fleets.some(f => f.kind === 'm' && f.to === m);
       if (pend) h += '<div class="row"><span class="badge cyan">Survey mission under way</span></div>';
       else {
-        h += '<div class="row tiny"><span class="cyan">' + rp(c.research) + '</span><span class="gold">' + money(c.cash) + '</span><span class="grow"></span><button class="btn primary small" data-act="visit-m" data-i="' + m + '"' + (chk.ok ? '' : ' disabled') + '>Send survey mission</button></div>';
+        h += '<div class="row tiny"><span class="cyan">' + rp(c.research) + '</span><span class="gold">' + money(c.cash) + '</span><span class="grow"></span><button class="btn primary small" data-act="visit-m" data-i="' + m + '"' + (chk.ok ? '' : ' disabled') + '>Send survey mission' + kb('Space') + '</button></div>';
         if (!chk.ok) h += '<div class="muted tiny">' + esc(chk.msg) + '</div>';
       }
     } else if (!dev) {
       const c = G.developMessierCost();
-      h += '<div class="row tiny"><span class="muted">Study in depth</span><span class="cyan">' + rp(c) + '</span><span class="grow"></span><button class="btn small" data-act="develop-m" data-i="' + m + '"' + (S.research >= c ? '' : ' disabled') + '>Double bonus</button></div>';
+      h += '<div class="row tiny"><span class="muted">Study in depth</span><span class="cyan">' + rp(c) + '</span><span class="grow"></span><button class="btn small" data-act="develop-m" data-i="' + m + '"' + (S.research >= c ? '' : ' disabled') + '>Double bonus' + kb('Space') + '</button></div>';
     }
     const lb = learnBadge('messier', m);
     if (lb) h += '<div class="row tiny muted">Sky School: ' + lb + '</div>';
@@ -411,10 +416,10 @@
       const ev = S.events.find(e => e.id === ui.redraw.id);
       if (!ev) { stopRedraw(); return renderBanner(); }
       cls = 'redraw';
-      html = '<div class="msg"><b>Redraw ' + esc(ev.name) + '</b><small>Tap two stars to reconnect the trade route between them. ' + ev.restored.length + '/' + ev.edges.length + ' restored · ' + ev.misses + ' miss' + (ev.misses === 1 ? '' : 'es') + ' · ' + dur(ev.remaining) + ' left' + (ui.hint ? ' · hints on (reward ÷4)' : '') + '</small></div><div class="btns"><button class="btn small" data-act="redraw-hint"' + (ui.hint ? ' disabled' : '') + '>Show hints</button><button class="btn small" data-act="redraw-stop">Done</button></div>';
+      html = '<div class="msg"><b>Redraw ' + esc(ev.name) + '</b><small>Tap two stars to reconnect the trade route between them. ' + ev.restored.length + '/' + ev.edges.length + ' restored · ' + ev.misses + ' miss' + (ev.misses === 1 ? '' : 'es') + ' · ' + dur(ev.remaining) + ' left' + (ui.hint ? ' · hints on (reward ÷4)' : '') + '</small></div><div class="btns"><button class="btn small" data-act="redraw-hint"' + (ui.hint ? ' disabled' : '') + '>Show hints' + kb('H') + '</button><button class="btn small" data-act="redraw-stop">Done' + kb('E') + '</button></div>';
     } else if (S.events.length) {
       const ev = S.events[0], left = ev.edges.length - ev.restored.length;
-      html = '<div class="msg"><b>' + (ev.kind === 'comet' ? '☄ ' : '✸ ') + esc(ev.name) + '</b><small>' + left + ' trade route' + (left === 1 ? '' : 's') + ' cut near ' + esc(ev.where) + ' · ' + dur(ev.remaining) + ' (the clock only runs while you play)</small></div><div class="btns"><button class="btn small primary" data-act="redraw-start" data-id="' + ev.id + '">Redraw routes</button></div>';
+      html = '<div class="msg"><b>' + (ev.kind === 'comet' ? '☄ ' : '✸ ') + esc(ev.name) + '</b><small>' + left + ' trade route' + (left === 1 ? '' : 's') + ' cut near ' + esc(ev.where) + ' · ' + dur(ev.remaining) + ' (the clock only runs while you play)</small></div><div class="btns"><button class="btn small primary" data-act="redraw-start" data-id="' + ev.id + '">Redraw routes' + kb('E') + '</button></div>';
     }
     if (html !== bannerHtml) { el.innerHTML = html; el.className = cls; el.hidden = !html; bannerHtml = html; document.body.classList.toggle('has-banner', !!html); }
   }
@@ -423,16 +428,16 @@
     const S = G.state, D = G.d, el = $('#attn');
     const full = G.attention();
     const chips = [];
-    if (S.events.length && !ui.redraw) chips.push('<span class="chip red" data-act="redraw-start" data-id="' + S.events[0].id + '">☄ routes cut</span>');
-    if (full.length) chips.push('<span class="chip gold" data-act="goto-full">$ ' + full.length + ' colon' + (full.length === 1 ? 'y' : 'ies') + ' with full storage</span>');
-    if (S.petitions.length) chips.push('<span class="chip cyan" data-act="goto-petition">✉ ' + S.petitions.length + ' petition' + (S.petitions.length === 1 ? '' : 's') + '</span>');
+    if (S.events.length && !ui.redraw) chips.push('<span class="chip red" data-act="redraw-start" data-id="' + S.events[0].id + '">☄ routes cut' + kb('E') + '</span>');
+    if (full.length) chips.push('<span class="chip gold" data-act="goto-full">$ ' + full.length + ' colon' + (full.length === 1 ? 'y' : 'ies') + ' with full storage' + kb('G') + '</span>');
+    if (S.petitions.length) chips.push('<span class="chip cyan" data-act="goto-petition">✉ ' + S.petitions.length + ' petition' + (S.petitions.length === 1 ? '' : 's') + kb('P') + '</span>');
     const idle = Math.max(0, D.slots - S.fleets.length);
     const canGo = idle > 0 && [...ui.frontier].some(t => G.canLaunchTo(t).ok);
-    if (canGo) chips.push('<span class="chip" data-act="goto-frontier">➤ ' + idle + ' ship' + (idle === 1 ? '' : 's') + ' idle</span>');
-    if (!S.tech.active && G.TECHS.some(t => G.techStatus(t.id) === 'available' && G.canStartTech(t.id).ok)) chips.push('<span class="chip cyan" data-act="open-corp-tech">⚗ lab idle: research available</span>');
+    if (canGo) chips.push('<span class="chip" data-act="goto-frontier">➤ ' + idle + ' ship' + (idle === 1 ? '' : 's') + ' idle' + kb('N') + '</span>');
+    if (!S.tech.active && G.TECHS.some(t => G.techStatus(t.id) === 'available' && G.canStartTech(t.id).ok)) chips.push('<span class="chip cyan" data-act="open-corp-tech">⚗ lab idle: research available' + kb('T') + '</span>');
     if (S.market.kind) { const m = G.MARKETS[S.market.kind]; chips.push('<span class="chip" data-act="open-corp" title="' + esc(m.text) + '">◈ ' + esc(m.name) + ' · ' + dur(S.market.remaining) + '</span>'); }
     const ready = QU.readyCount();
-    if (ready) chips.unshift('<span class="chip gold" data-act="open-quests">✔ ' + ready + ' quest' + (ready === 1 ? '' : 's') + ' ready</span>');
+    if (ready) chips.unshift('<span class="chip gold" data-act="open-quests">✔ ' + ready + ' quest' + (ready === 1 ? '' : 's') + ' ready' + kb('Q') + '</span>');
     const qb = $('#qbadge'); qb.hidden = !ready; qb.textContent = ready;
     if (ready > ui.lastReady) toast('Quest complete! Open Quests to claim your reward.', 'gold');
     ui.lastReady = ready;
@@ -458,7 +463,7 @@
 
   // ---------------------------------------------------------------- modal infrastructure
   function openModal(spec) {
-    ui.modal = spec; ui.tab = spec.tab || (spec.tabs && spec.tabs[0] && spec.tabs[0][0]) || null;
+    ui.modal = spec; ui.tab = spec.tab || (spec.tabs && spec.tabs[0] && spec.tabs[0][0]) || null; ui.held.clear();
     $('#modal').hidden = false; renderModal();
   }
   function closeModal() { ui.modal = null; $('#modal').hidden = true; $('#modal-body').innerHTML = ''; }
@@ -475,7 +480,7 @@
     if (ui.modal.keepScroll || ui.modal.live) body.scrollTop = keep;
   }
   const CODEX_TABS = [['const', 'Constellations'], ['messier', 'Messier'], ['stars', 'Named stars'], ['learning', 'Learning'], ['chron', 'Chronicle']];
-  function openCodex(tab) { openModal({ title: 'Codex', tabs: CODEX_TABS, tab: tab || 'const' }); }
+  function openCodex(tab) { openModal({ id: 'codex', title: 'Codex', tabs: CODEX_TABS, tab: tab || 'const' }); }
 
   function consBadge(cs) {
     return cs.mastered ? '<span class="badge gold">★ mastered</span>' : cs.developed ? '<span class="badge gold">developed</span>' : cs.all ? '<span class="badge green">colonised</span>' : cs.claimed ? '<span class="badge">' + cs.claimed + '/' + cs.total + '</span>' : '<span class="badge">unexplored</span>';
@@ -547,7 +552,7 @@
         h += '<div class="learn-card"><div class="row"><b class="grow">' + name + '</b><span class="cyan">' + pr.learned + ' / ' + pr.total + ' learned</span></div><div class="stack">' + seg(n('learned'), 'l') + seg(due, 'd') + seg(learning, 'g') + '</div><div class="row tiny muted"><span class="gold">' + due + ' due</span><span>' + learning + ' waiting</span><span>' + (fresh ? fresh + ' not started' : '') + '</span></div>' + (pr.extra ? '<div class="tiny muted">+' + pr.extra + ' other designations learned</div>' : '') + '</div>';
       }
       h += '</div>';
-      h += '<div class="row" style="margin:6px 0 12px"><button class="btn gold" data-act="school-review"' + (dueTotal ? '' : ' disabled') + '>' + (dueTotal ? 'Review ' + dueTotal + ' due item' + (dueTotal === 1 ? '' : 's') + ' in Sky School' : 'Nothing due right now') + '</button><button class="btn" data-act="open-school">Open Sky School</button></div>';
+      h += '<div class="row" style="margin:6px 0 12px"><button class="btn gold" data-act="school-review"' + (dueTotal ? '' : ' disabled') + '>' + (dueTotal ? 'Review ' + dueTotal + ' due item' + (dueTotal === 1 ? '' : 's') + ' in Sky School' + kb('R') : 'Nothing due right now') + '</button><button class="btn" data-act="open-school">Open Sky School</button></div>';
       h += '<div class="filters">' + [['all', 'All'], ...cats].map(([k, l]) => '<span class="chip ' + (catF === k ? 'on' : '') + '" data-act="filter" data-k="learnCat" data-v="' + k + '">' + l + '</span>').join('') + '<span class="muted tiny" style="margin:0 4px">·</span>' + [['started', 'In progress'], ['due', 'Due'], ['learning', 'Waiting'], ['learned', 'Learned'], ['new', 'Not started'], ['all', 'Everything']].map(([k, l]) => '<span class="chip ' + (stF === k ? 'on' : '') + '" data-act="filter" data-k="learnStatus" data-v="' + k + '">' + l + '</span>').join('') + '</div>';
       let rows = [];
       for (const { c, items } of all) if (catF === 'all' || catF === c) rows = rows.concat(items);
@@ -587,7 +592,7 @@
 
   // ---------------------------------------------------------------- constellation page
   function openConst(c) {
-    openModal({ title: SKY.consts[c].name, tabs: null, keepScroll: true, render: body => renderConstPage(body, c) });
+    openModal({ id: 'const', title: SKY.consts[c].name, tabs: null, keepScroll: true, render: body => renderConstPage(body, c) });
   }
   let chartHit = [];
   function renderConstPage(body, c) {
@@ -633,7 +638,7 @@
 
   // ---------------------------------------------------------------- the corporation: overview, technology, buildings
   const CORP_TABS = [['overview', 'Overview'], ['tech', 'Technology'], ['buildings', 'Buildings']];
-  function openCorp(tab) { openModal({ title: 'Corporation', tabs: CORP_TABS, tab: tab || 'overview', renderers: CORP_RENDER, live: true }); }
+  function openCorp(tab) { openModal({ id: 'corp', title: 'Corporation', tabs: CORP_TABS, tab: tab || 'overview', renderers: CORP_RENDER, live: true }); }
   function sparkline(cv, hist) {
     const dpr = Math.min(2, window.devicePixelRatio || 1), W = cv.clientWidth || 300, H = cv.clientHeight || 70;
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
@@ -668,6 +673,7 @@
         const a = S.tech.active, t = G.TECH_BY_ID[a.id];
         h += '<div class="callout"><b>⚗ Researching: ' + esc(t.name) + '</b><div class="bar cy" style="margin:6px 0"><i style="width:' + Math.min(100, (1 - a.remaining / a.dur) * 100) + '%"></i></div><span class="muted">' + dur(a.remaining) + ' remaining</span></div>';
       }
+      const avail = G.TECHS.filter(x => G.techStatus(x.id) === 'available'); // the number keys start these, in this order
       G.Corp.ERAS.forEach((era, e) => {
         h += '<h3 class="era">' + esc(era.name) + ' <span class="muted tiny">' + esc(era.years) + '</span></h3><div class="techgrid">';
         for (const t of G.TECHS.filter(x => x.era === e)) {
@@ -679,7 +685,7 @@
           if (t.unlocks.length) h += '<div class="tiny" style="margin-top:3px">Unlocks: ' + t.unlocks.map(u => bico(G.BUILDINGS[u]) + ' ' + esc(G.BUILDINGS[u].name)).join(' · ') + '</div>';
           if (perks) h += '<div class="tiny cyan">' + esc(perks) + '</div>';
           if (t.req.length && st !== 'done') h += '<div class="tiny">Needs: ' + reqs + '</div>';
-          if (st === 'available' || st === 'locked') h += '<div class="row tiny"><span class="gold">' + money(c.cash) + '</span><span class="cyan">' + rp(c.research) + '</span><span class="muted">' + dur(c.secs) + '</span><span class="grow"></span><button class="btn small primary" data-act="start-tech" data-id="' + t.id + '"' + (chk && chk.ok ? '' : ' disabled') + '>Research</button></div>' + (chk && !chk.ok ? '<div class="muted tiny">' + esc(chk.msg) + '</div>' : '');
+          if (st === 'available' || st === 'locked') h += '<div class="row tiny"><span class="gold">' + money(c.cash) + '</span><span class="cyan">' + rp(c.research) + '</span><span class="muted">' + dur(c.secs) + '</span><span class="grow"></span><button class="btn small primary" data-act="start-tech" data-id="' + t.id + '"' + (chk && chk.ok ? '' : ' disabled') + '>Research' + (st === 'available' ? kbRow(avail.indexOf(t)) : '') + '</button></div>' + (chk && !chk.ok ? '<div class="muted tiny">' + esc(chk.msg) + '</div>' : '');
           h += '</div>';
         }
         h += '</div>';
@@ -704,7 +710,7 @@
   };
 
   // ---------------------------------------------------------------- quests
-  function openQuests() { openModal({ title: 'Quests', tabs: null, keepScroll: true, render: renderQuests }); }
+  function openQuests() { openModal({ id: 'quests', title: 'Quests', tabs: null, keepScroll: true, render: renderQuests }); }
   function questRow(q) {
     const pctDone = Math.min(100, q.cur / q.target * 100);
     return '<div class="quest' + (q.done ? ' done' : '') + '"><div class="row"><b class="grow">' + esc(q.title) + '</b>' + (q.chapter ? '<span class="badge">' + esc(q.chapter) + '</span>' : '') + '</div>' +
@@ -716,6 +722,8 @@
   function renderQuests(body) {
     const L = QU.list();
     let h = '<p class="muted" style="margin-top:0;max-width:640px">Contracts are short repeatable jobs that refresh as you finish them. Story quests are long goals across the whole game. Rewards are worth minutes of your revenue, so they keep up as you grow.</p>';
+    const nReady = L.contracts.concat(L.story).filter(q => q.done).length;
+    if (nReady) h += '<div class="row"><button class="btn gold" data-act="quest-claim-all">Claim all ' + nReady + ' ready' + kb('Enter') + '</button></div>';
     h += '<h3>Contracts</h3><div class="quests">' + L.contracts.map(questRow).join('') + '</div>';
     h += '<h3>Story <span class="muted tiny">' + L.claimedCount + ' / ' + L.total + ' completed' + (L.later ? ' · ' + L.later + ' more to unlock' : '') + '</span></h3><div class="quests">' + L.story.map(questRow).join('') + '</div>';
     body.innerHTML = h;
@@ -723,13 +731,14 @@
 
   // ---------------------------------------------------------------- Sky School (minigames)
   ui.school = { view: 'menu', round: null, shown: null, learned: [] };
+  const schoolSpec = () => ({ id: 'school', title: 'Sky School', tabs: null, render: renderSchool });
   function openSchool() {
     ui.school = { view: 'menu', round: null, shown: null, learned: [] };
-    openModal({ title: 'Sky School', tabs: null, render: renderSchool });
+    openModal(schoolSpec());
   }
   function startReview() {
     ui.school = { view: 'q', round: QZ.startRound('mixed', QZ.ROUND_LENGTH, { dueOnly: true }), shown: null, learned: [] };
-    openModal({ title: 'Sky School', tabs: null, render: renderSchool });
+    openModal(schoolSpec());
   }
   const LETTERS = ['A', 'B', 'C', 'D'];
   const intervalText = ms => ms < 3600e3 ? Math.round(ms / 60e3) + ' min' : ms < 86400e3 ? Math.round(ms / 3600e3) + ' h' : Math.round(ms / 86400e3) + ' d';
@@ -741,11 +750,11 @@
       let h = '<p class="muted" style="margin-top:0;max-width:680px">Short rounds of five questions, like staff training for your astronomers. A correct answer pays a little cash and research (about ' + QZ.REWARD.seconds + ' seconds of your revenue, <b>×' + QZ.REWARD.firstTime + '</b> the first time you get something right, with small streak and perfect-round bonuses). It is a side income, not a business plan.</p>' +
         '<div class="callout"><b>Spaced repetition.</b> Nothing is <span class="badge cyan">learned</span> after one lucky answer. Each item needs <b>' + QZ.LEARN_BOX + ' correct answers</b>, and each one only counts once its review is due: ' + QZ.INTERVALS.slice(1, QZ.LEARN_BOX).map(intervalText).join(' → ') + '. Answering early still pays a trickle but doesn’t advance it; a wrong answer sends it back two steps. Items that are due come up most often. See your progress in <span class="link" data-act="open-learning">Codex → Learning</span>.</div>';
       h += '<div class="stat-grid"><div class="stat"><b>' + st.answered + '</b><span>answered</span></div><div class="stat"><b>' + (st.answered ? Math.round(st.correct / st.answered * 100) + '%' : '·') + '</b><span>accuracy</span></div><div class="stat"><b>' + st.bestStreak + '</b><span>best streak</span></div><div class="stat"><b>' + st.perfect + ' / ' + st.rounds + '</b><span>perfect rounds</span></div><div class="stat"><b class="gold">' + money(base.cash) + '</b><span>per correct answer now</span></div></div>';
-      if (dueAll) h += '<div class="row" style="margin-bottom:12px"><button class="btn gold" data-act="school-review">Review ' + dueAll + ' due item' + (dueAll === 1 ? '' : 's') + '</button></div>';
+      if (dueAll) h += '<div class="row" style="margin-bottom:12px"><button class="btn gold" data-act="school-review">Review ' + dueAll + ' due item' + (dueAll === 1 ? '' : 's') + kb('R') + '</button></div>';
       h += '<div class="school-cats">';
-      for (const cat of ['const', 'star', 'messier', 'mixed']) {
+      for (const [ci, cat] of ['const', 'star', 'messier', 'mixed'].entries()) {
         const info = Quiz.CATS[cat], pr = cat === 'mixed' ? null : QZ.progress(cat);
-        h += '<button class="school-cat" data-act="school-start" data-cat="' + cat + '"><b>' + info.name + '</b><span class="muted">' + info.blurb + '</span>' + (pr ? '<span class="tiny ' + (pr.learned ? 'cyan' : 'muted') + '">learned ' + pr.learned + ' / ' + pr.total + (pr.extra ? ' (+' + pr.extra + ' designations)' : '') + '</span><span class="tiny ' + (pr.due ? 'gold' : 'muted') + '">' + pr.started + ' in progress · ' + pr.due + ' due for review</span>' : '<span class="tiny muted">all three kinds</span>') + '</button>';
+        h += '<button class="school-cat" data-act="school-start" data-cat="' + cat + '"><b>' + info.name + kb(ci + 1) + '</b><span class="muted">' + info.blurb + '</span>' + (pr ? '<span class="tiny ' + (pr.learned ? 'cyan' : 'muted') + '">learned ' + pr.learned + ' / ' + pr.total + (pr.extra ? ' (+' + pr.extra + ' designations)' : '') + '</span><span class="tiny ' + (pr.due ? 'gold' : 'muted') + '">' + pr.started + ' in progress · ' + pr.due + ' due for review</span>' : '<span class="tiny muted">all three kinds</span>') + '</button>';
       }
       body.innerHTML = h + '</div>';
       return;
@@ -757,7 +766,7 @@
       h += '<div class="stat-grid"><div class="stat"><b class="gold">' + money(r.earned.cash + (r.bonus ? r.bonus.cash : 0)) + '</b><span>cash earned</span></div><div class="stat"><b class="cyan">' + rp(r.earned.research + (r.bonus ? r.bonus.research : 0)) + '</b><span>research earned</span></div><div class="stat"><b>' + r.best + '</b><span>best streak</span></div></div>';
       if (r.bonus) h += '<p class="good">Perfect-round bonus included: +' + money(r.bonus.cash) + ' and +' + rp(r.bonus.research) + '.</p>';
       if (sc.learned.length) h += '<p class="cyan">Newly learned: ' + sc.learned.map(esc).join(', ') + '</p>';
-      h += '<div class="row"><button class="btn primary" data-act="school-start" data-cat="' + r.cat + '">Another round</button><button class="btn" data-act="school-menu">Back to Sky School</button></div></div>';
+      h += '<div class="row"><button class="btn primary" data-act="school-start" data-cat="' + r.cat + '">Another round' + kb('Space') + '</button><button class="btn" data-act="school-menu">Back to Sky School' + kb('⌫') + '</button></div></div>';
       body.innerHTML = h; return;
     }
     const shown = sc.shown;
@@ -785,7 +794,7 @@
       if (res.correct) h += ' <span class="gold">+' + money(res.reward.cash) + '</span> <span class="cyan">+' + rp(res.reward.research) + '</span> <span class="muted tiny">' + (res.reward.item >= 1.5 ? 'first time ×' + res.reward.item : res.reward.item < 0.5 ? 'too soon to count' : 'review ×' + res.reward.item.toFixed(2)) + (res.reward.streak > 1 ? ' · streak ×' + res.reward.streak.toFixed(2) : '') + '</span>';
       h += '<div class="tiny" style="margin-top:4px">' + esc(Q.explain) + '</div>';
       h += '<div class="tiny srs">' + (res.learnedNow ? '<b class="cyan">★ Learned!</b> All ' + res.learnedBox + ' reviews done. ' : res.correct ? (res.counted ? 'Review counted: <b>' + res.box + ' / ' + res.learnedBox + '</b>. Next counting review in ' + dur(res.nextReviewMs / 1000) + '.' : 'Answered too soon to count (still ' + res.box + ' / ' + res.learnedBox + '). A counting review is due in ' + dur(res.nextReviewMs / 1000) + '.') : 'Back to <b>' + res.box + ' / ' + res.learnedBox + '</b>; it will come back soon.') + '</div>';
-      h += '<div class="row" style="margin-top:8px"><button class="btn primary" data-act="school-next">' + (res.last ? 'See results' : 'Next question') + '</button></div></div>';
+      h += '<div class="row" style="margin-top:8px"><button class="btn primary" data-act="school-next">' + (res.last ? 'See results' : 'Next question') + kb('Space') + '</button></div></div>';
     }
     body.innerHTML = h;
     drawVisuals(body);
@@ -803,7 +812,7 @@
   }
 
   // ---------------------------------------------------------------- fleets & charters
-  function openFleets() { openModal({ title: 'Fleet & charters', tabs: null, render: renderFleets }); }
+  function openFleets() { openModal({ id: 'fleets', title: 'Fleet & charters', tabs: null, render: renderFleets }); }
   function renderFleets(body) {
     const S = G.state, D = G.d;
     let h = '<div class="muted" style="margin-bottom:10px">' + S.fleets.length + ' of ' + D.slots + ' ships out. More slots come from Logistics levels, Launch Pads, Orbital Shipyards and globular clusters.</div><h3 style="margin-top:0">In flight</h3>';
@@ -823,8 +832,8 @@
     const d = readKey(SLOT(n));
     return '<div class="slot"><div class="grow"><b>Slot ' + n + '</b><div class="muted tiny">' + (d ? esc(summary(d)) : 'empty') + '</div></div><button class="btn small" data-act="slot-save" data-n="' + n + '">Save</button><button class="btn small" data-act="slot-load" data-n="' + n + '"' + (d ? '' : ' disabled') + '>Load</button></div>';
   }
-  const MENU_TABS = [['save', 'Save'], ['guide', 'How to play'], ['about', 'About']];
-  function openMenu() { openModal({ title: 'Menu', tabs: MENU_TABS, tab: 'save', renderers: MENU_RENDER }); }
+  const MENU_TABS = [['save', 'Save'], ['guide', 'How to play'], ['about', 'About'], ['keys', 'Keys']];
+  function openMenu(tab) { openModal({ id: 'menu', title: 'Menu', tabs: MENU_TABS, tab: tab || 'save', renderers: MENU_RENDER }); }
   const MENU_RENDER = {
     save(body) {
       let h = '<div class="menu-list"><div class="muted">Your corporation autosaves in this browser every few seconds. Use slots or an exported file for extra safety.</div>';
@@ -848,7 +857,17 @@
         '<h3>Sky School</h3><p>Five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, and identify Messier objects by picture and type. Rewards are modest. Everything runs on spaced repetition: an item needs 10 correct answers, spaced further and further apart, before it is <b>learned</b>. Track it all under <b>Codex → Learning</b>.</p>' +
         '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a long <b>story</b> chain. Rewards are worth minutes of your revenue.</p>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
-        '<h3>Petitions</h3><p>Colonies sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. Nothing in this game dims, decays or is taken from you.</p></div>';
+        '<h3>Petitions</h3><p>Colonies sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. Nothing in this game dims, decays or is taken from you.</p>' +
+        '<h3 class="k-only">Keyboard</h3><p class="k-only">Every window and most actions have a key, shown on the buttons. <b>Space</b> expands (sends a colony ship or survey mission), <b>C</b> opens the Codex, <b>1–9</b> build in the selected colony and <b>R</b> collects. Press <b>?</b> for the full list (Menu → Keys).</p></div>';
+    },
+    keys(body) {
+      let h = '<p class="muted" style="margin-top:0;max-width:720px">Keys are ignored while you type in a text box, and the key badges on buttons are hidden on touch screens. Window keys toggle: press again to close.</p><div class="keys-grid">';
+      for (const [title, rows] of KEY_HELP) {
+        h += '<div class="keys-group"><h3>' + esc(title) + '</h3><table class="t">';
+        for (const [keys, text] of rows) h += '<tr><td class="keycell">' + keys.map(k => '<kbd class="kk">' + esc(k) + '</kbd>').join(' ') + '</td><td>' + esc(text) + '</td></tr>';
+        h += '</table></div>';
+      }
+      body.innerHTML = h + '</div>';
     },
     about(body) {
       body.innerHTML = '<div class="how" style="max-width:720px"><h3 style="margin-top:0">Firmament</h3><p>A corporate expansion game on the real night sky. All star positions, brightnesses and colours are real; travel times, economics and the corporation are invented.</p>' +
@@ -872,7 +891,12 @@
     'build-lane': el => { const r = G.buildLane(+el.dataset.e); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'quest-claim': el => { const r = QU.claim(el.dataset.id); toast(r.ok ? 'Quest reward: +' + money(r.reward.cash) + '  +' + rp(r.reward.research) : r.msg, r.ok ? 'gold' : 'bad'); },
     'quest-reroll': el => { QU.rerollContract(el.dataset.id); },
-    'school-start': el => { ui.school = { view: 'q', round: QZ.startRound(el.dataset.cat), shown: null, learned: [] }; if (!ui.modal || ui.modal.title !== 'Sky School') openModal({ title: 'Sky School', tabs: null, render: renderSchool }); },
+    'quest-claim-all': () => {
+      const L = QU.list(); let cash = 0, res = 0, n = 0;
+      for (const q of L.contracts.concat(L.story)) if (q.done) { const r = QU.claim(q.id); if (r.ok) { cash += r.reward.cash; res += r.reward.research; n++; } }
+      toast(n ? 'Claimed ' + plural(n, 'quest') + ': +' + money(cash) + '  +' + rp(res) : 'Nothing to claim yet.', n ? 'gold' : 'bad');
+    },
+    'school-start': el => { ui.school = { view: 'q', round: QZ.startRound(el.dataset.cat), shown: null, learned: [] }; if (!ui.modal || ui.modal.id !== 'school') openModal(schoolSpec()); },
     'school-review': () => startReview(),
     'school-answer': el => schoolAnswer(+el.dataset.i),
     'school-next': () => { const sc = ui.school; sc.shown = null; if (sc.round.done) sc.view = 'summary'; },
@@ -908,6 +932,12 @@
   };
   // after these actions the modal swaps itself, so it must not be re-rendered again by the click handler
   const NO_RERENDER = ['open-const', 'tab', 'filter', 'goto-star', 'goto-messier', 'goto-const', 'close-modal', 'open-codex', 'open-menu', 'open-corp', 'open-corp-tech', 'open-learning', 'open-school', 'open-quests', 'open-fleets', 'school-review', 'slot-load', 'reset'];
+  function afterAct(name) {
+    if (!ui.started) return;
+    scheduleSave(); renderHud(); renderPanel();
+    if (ui.modal && !NO_RERENDER.includes(name)) renderModal();
+  }
+  function runAct(name, data) { const fn = ACT[name]; if (fn) { fn({ dataset: data || {} }); afterAct(name); } }
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');
     if (!el || el.disabled) return;
@@ -915,13 +945,245 @@
     if (!fn) return;
     e.stopPropagation();
     fn(el);
-    if (ui.started) { scheduleSave(); renderHud(); renderPanel(); if (ui.modal && !NO_RERENDER.includes(el.dataset.act)) renderModal(); }
+    afterAct(el.dataset.act);
+    if (e.detail > 0 && el.blur) el.blur(); // a mouse click must not leave a button focused, or Space/Enter would press it again
   });
   $('#modal').addEventListener('pointerdown', e => { if (e.target.id === 'modal') closeModal(); });
+
+  // ---------------------------------------------------------------- keyboard shortcuts
+  // Letters follow the keyboard layout (e.key); digits use the physical number row (e.code), so Shift+digit and AZERTY work.
+  const KEY_HELP = [
+    ['Windows (work anywhere)', [
+      [['C'], 'Codex: constellations, Messier objects, named stars, your learning progress'],
+      [['Q'], 'Quests and contracts'],
+      [['S'], 'Sky School'],
+      [['O'], 'Corporation overview'],
+      [['T'], 'Technology tree'],
+      [['B'], 'Buildings catalogue'],
+      [['F'], 'Fleets and queued charters'],
+      [['?'], 'This list'],
+      [['Esc'], 'Close the window, finish redrawing, or deselect. With nothing to close it opens the menu'],
+    ]],
+    ['Expand', [
+      [['Space'], 'Send a colony ship to the selected star, survey the selected Messier object, or otherwise send a ship to the best-paying new star (next to the selected colony if one is selected)'],
+      [['Shift', 'Space'], 'Send a ship to the best new star for every idle ship'],
+      [['N'], 'Next new star to colonise (Shift+N: previous)'],
+      [['M'], 'Next Messier object in reach to survey (Shift+M: previous)'],
+      [['G'], 'Next colony with full storage, fullest first (Shift+G: previous)'],
+      [['P'], 'Next petition'],
+      [['H'], 'Go to headquarters (while redrawing: show hints)'],
+    ]],
+    ['At the selected colony', [
+      [['R'], 'Collect revenue (Shift+R: the whole constellation, once it is developed)'],
+      [['I'], 'Develop Industry'],
+      [['L'], 'Develop Logistics'],
+      [['D'], 'Develop R&D'],
+      [['1', '…', '9', '0'], 'Build or upgrade the numbered building in the panel (the number is on its button)'],
+    ]],
+    ['Map', [
+      [['←', '↑', '↓', '→'], 'Pan (hold Shift to go faster)'],
+      [['+', '−'], 'Zoom'],
+      [['E'], 'Redraw the routes cut by a comet or nova (press again, or Esc, to finish)'],
+    ]],
+    ['Inside windows', [
+      [['←', '→'], 'Switch tabs'],
+      [['1', '…', '5'], 'Codex and Menu: jump to a tab'],
+      [['1', '…', '9'], 'Corporation → Technology: start the numbered project'],
+      [['R'], 'Codex → Learning, and the Sky School menu: review what is due'],
+      [['Enter'], 'Quests: claim everything that is ready'],
+      [['1', '…', '4'], 'Sky School menu: start a round. In a question: answer (A–D work too)'],
+      [['Space'], 'Sky School: next question, or another round'],
+      [['⌫'], 'Sky School results, and a constellation page: back'],
+    ]],
+  ];
+  const isTyping = el => !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+  const isButtonLike = el => !!el && /^(BUTTON|A|SUMMARY)$/.test(el.tagName);
+  function digitOf(e) { // 0-9 from the number row or the numpad (with NumLock on)
+    const m = /^(Digit|Numpad)(\d)$/.exec(e.code || '');
+    return m && (m[1] === 'Digit' || /^\d$/.test(e.key)) ? +m[2] : -1;
+  }
+  const rowOf = d => (d + 9) % 10; // 1..9 then 0 are rows 1..10
+  function moveAction(e) {
+    switch (e.key) {
+      case 'ArrowLeft': return 'left'; case 'ArrowRight': return 'right'; case 'ArrowUp': return 'up'; case 'ArrowDown': return 'down';
+      case '+': case '=': return 'in'; case '-': case '_': return 'out';
+    }
+    return e.code === 'NumpadAdd' ? 'in' : e.code === 'NumpadSubtract' ? 'out' : null;
+  }
+  function handled(e) { e.preventDefault(); if (isButtonLike(document.activeElement)) document.activeElement.blur(); return true; }
+
+  function cycleList(list, cur, dir) { // the item after (or before) cur in list; the first (last) one if cur is not in it; -1 when empty
+    if (!list.length) return -1;
+    const k = list.indexOf(cur);
+    return list[k < 0 ? (dir > 0 ? 0 : list.length - 1) : (k + dir + list.length) % list.length];
+  }
+  function focusStar(i) { ui.sel = { type: 'star', i }; sky.goStar(i, Math.max(sky.v.zoom, 2.4)); }
+  function focusMessier(m) { ui.sel = { type: 'messier', i: m }; sky.goMessier(m); }
+
+  // Space: expand. A selected Messier object is surveyed (then studied in depth); a selected uncolonised star gets a ship (a charter if
+  // every ship is out); otherwise the best-paying new star does, next to the selected colony if there is one. Shift+Space fills every idle ship.
+  function expand(all) {
+    const S = G.state, sel = ui.sel, idle = () => Math.max(0, G.d.slots - S.fleets.length);
+    if (sel && sel.type === 'messier') {
+      const m = sel.i;
+      if (!S.messier[m]) { const r = G.visitMessier(m); toast(r.msg, r.ok ? 'good' : 'bad'); return; }
+      if (!S.messier[m].dev) { const r = G.developMessier(m); toast(r.msg, r.ok ? 'good' : 'bad'); return; }
+    }
+    if (sel && sel.type === 'star' && !S.stars[sel.i] && !all) {
+      const chk = G.canLaunchTo(sel.i);
+      if (chk.ok) { const r = G.launch(sel.i); toast(r.msg, r.ok ? 'good' : 'bad'); return; }
+      if (!G.targetsPending().has(sel.i)) { toast(chk.msg, 'bad'); return; } // otherwise a ship is already bound there: carry on to the next best star
+    }
+    if (idle() === 0) { toast('All ' + G.d.slots + ' ships are out. Select a star and press Space to queue a charter.', 'bad'); return; }
+    const near = sel && sel.type === 'star' && S.stars[sel.i] ? sel.i : undefined;
+    const sailsNow = x => G.frontierOrigins(x).length > 0; // next to a colony, so the ship can leave straight away
+    const sent = [];
+    do {
+      const list = G.expansionTargets(near);
+      if (!list.length) { if (!sent.length) toast('No new star to colonise: every star in reach is yours or has a ship bound for it.', 'bad'); break; }
+      let t = list.find(x => sailsNow(x) && G.canLaunchTo(x).ok);
+      if (t === undefined && !all) t = list.find(x => G.canLaunchTo(x).ok); // one press may queue a charter along a chain
+      if (t === undefined) { if (!sent.length) toast(G.canLaunchTo(list[0]).msg, 'bad'); break; }
+      const r = G.launch(t);
+      if (!r.ok) { if (!sent.length) toast(r.msg, 'bad'); break; }
+      sent.push(t);
+    } while (all && idle() > 0 && sent.length < 40);
+    if (!sent.length) return;
+    const last = sent[sent.length - 1];
+    ui.sel = { type: 'star', i: last };
+    if (!all) { sky.goStar(last, Math.max(sky.v.zoom, 2.4)); toast('Colony ship sent to ' + SKY.stars[last][6] + '.', 'good'); }
+    else toast('Sent ' + plural(sent.length, 'colony ship') + ' to ' + sent.slice(0, 3).map(i => SKY.stars[i][6]).join(', ') + (sent.length > 3 ? ' …' : '') + '.', 'good');
+  }
+
+  function toggleModal(id, open) { if (ui.modal && ui.modal.id === id) closeModal(); else open(); }
+  function toggleCorp(tab) { if (ui.modal && ui.modal.id === 'corp' && ui.tab === tab) closeModal(); else openCorp(tab); }
+  function toggleMenu(tab) { if (ui.modal && ui.modal.id === 'menu' && ui.tab === tab) closeModal(); else openMenu(tab); }
+  function windowKey(key) {
+    switch (key) {
+      case 'c': toggleModal('codex', () => openCodex()); return true;
+      case 'q': toggleModal('quests', openQuests); return true;
+      case 's': if (!(ui.modal && ui.modal.id === 'school' && ui.school.view === 'q')) toggleModal('school', openSchool); return true; // not in the middle of a round
+      case 'o': toggleCorp('overview'); return true;
+      case 't': toggleCorp('tech'); return true;
+      case 'b': toggleCorp('buildings'); return true;
+      case 'f': toggleModal('fleets', openFleets); return true;
+      case '?': case '/': toggleMenu('keys'); return true;
+    }
+    return false;
+  }
+  function escapeKey() {
+    if (ui.modal) closeModal();
+    else if (ui.redraw) stopRedraw();
+    else if (ui.sel) ui.sel = null;
+    else openMenu();
+  }
+  function selectTab(k) { const m = ui.modal; if (m && m.tabs && m.tabs[k]) { ui.tab = m.tabs[k][0]; renderModal(); } }
+  function shiftTab(dir) { const m = ui.modal; if (m && m.tabs) selectTab((m.tabs.findIndex(t => t[0] === ui.tab) + dir + m.tabs.length) % m.tabs.length); }
+
+  function schoolKey(key, d) {
+    const sc = ui.school;
+    if (sc.view === 'menu') {
+      if (d >= 1 && d <= 4) { runAct('school-start', { cat: ['const', 'star', 'messier', 'mixed'][d - 1] }); return true; }
+      if (key === 'r' && ['const', 'star', 'messier'].some(c => QZ.progress(c).due)) { runAct('school-review'); return true; }
+      return false;
+    }
+    if (sc.view === 'summary') {
+      if (key === ' ' || key === 'Enter') { runAct('school-start', { cat: sc.round.cat }); return true; }
+      if (key === 'Backspace' || key === 'ArrowLeft') { runAct('school-menu'); return true; }
+      return false;
+    }
+    if (!sc.shown) { // a question: 1-4 or A-D answer it, and A-D never fall through to the window keys
+      const q = sc.round.qs[sc.round.i], idx = d >= 1 && d <= 4 ? d - 1 : 'abcd'.indexOf(key.length === 1 ? key : '#');
+      if (q && idx >= 0 && idx < q.options.length) { runAct('school-answer', { i: idx }); return true; }
+      return key.length === 1 && 'abcd'.includes(key);
+    }
+    if (key === ' ' || key === 'Enter') { runAct('school-next'); return true; }
+    return key.length === 1 && 'abcd'.includes(key);
+  }
+  function modalKey(key, d) {
+    const m = ui.modal;
+    if (m.id === 'school') return schoolKey(key, d);
+    if (m.id === 'quests') { if (key === 'Enter' || key === 'a') { runAct('quest-claim-all'); return true; } return false; }
+    if (m.id === 'const') { if (key === 'ArrowLeft' || key === 'Backspace') { openCodex(); return true; } return false; }
+    if (m.tabs && m.tabs.length) {
+      if (key === 'ArrowLeft' || key === 'ArrowRight') { shiftTab(key === 'ArrowRight' ? 1 : -1); return true; }
+      if (m.id === 'corp' && ui.tab === 'tech' && d >= 0) {
+        const t = G.TECHS.filter(x => G.techStatus(x.id) === 'available')[rowOf(d)];
+        if (t) runAct('start-tech', { id: t.id }); else toast('No research project has that number.', 'bad');
+        return true;
+      }
+      if (m.id === 'codex' && ui.tab === 'learning' && key === 'r') {
+        if (['const', 'star', 'messier'].some(c => QZ.progress(c).due)) runAct('school-review'); else toast('Nothing is due for review right now.', 'bad');
+        return true;
+      }
+      if ((m.id === 'codex' || m.id === 'menu') && d >= 1 && d <= m.tabs.length) { selectTab(d - 1); return true; }
+    }
+    return false;
+  }
+
+  function mapKey(key, d, shift) {
+    const S = G.state, sel = ui.sel;
+    const colony = sel && sel.type === 'star' && S.stars[sel.i] ? sel.i : -1;
+    const needColony = () => { if (colony >= 0) return true; toast('Select a colony first (G finds the fullest one, H goes to headquarters).', 'bad'); return false; };
+    if (d >= 0) { // the numbered building rows of the selected colony
+      if (!needColony()) return true;
+      const rows = G.buildOptions(colony), r = rows[rowOf(d)];
+      if (!rows.length) toast(G.slotsAt(colony) ? 'Nothing more to build here yet. Research technology to unlock buildings.' : 'No building slot yet: develop this colony to 3 levels.', 'bad');
+      else if (!r) toast('This colony has ' + plural(rows.length, 'building option') + ' (' + (rows.length > 9 ? '1–9 and 0' : '1–' + rows.length) + ').', 'bad');
+      else runAct('build', { i: colony, id: r.id });
+      return true;
+    }
+    switch (key) {
+      case ' ': expand(shift); return true;
+      case 'n': { const t = cycleList(G.expansionTargets(), sel && sel.type === 'star' ? sel.i : -1, shift ? -1 : 1); if (t < 0) toast('No new star to colonise: every star in reach is yours or has a ship bound for it.', 'bad'); else focusStar(t); return true; }
+      case 'm': { const m = cycleList(G.messierTargets(), sel && sel.type === 'messier' ? sel.i : -1, shift ? -1 : 1); if (m < 0) toast('No Messier object is in reach: colonise a star near one first.', 'bad'); else focusMessier(m); return true; }
+      case 'g': { const t = cycleList(G.attention().map(a => a.star), colony, shift ? -1 : 1); if (t < 0) toast('No colony has full storage right now.', 'bad'); else focusStar(t); return true; }
+      case 'p': { const t = cycleList(S.petitions.map(p => p.star), colony, shift ? -1 : 1); if (t < 0) toast('No colony has a petition right now.', 'bad'); else focusStar(t); return true; }
+      case 'h': focusStar(S.home); return true;
+      case 'r': {
+        if (!needColony()) return true;
+        if (shift) {
+          const c = SKY.stars[colony][5];
+          if (G.canCollectConstellation(c)) runAct('collect-const', { c }); else toast('Develop ' + SKY.consts[c].name + ' to unlock one-tap collection for the whole constellation.', 'bad');
+        } else runAct('collect', { i: colony });
+        return true;
+      }
+      case 'i': case 'l': case 'd': if (needColony()) runAct('upgrade', { i: colony, t: G.TRACKS['ild'.indexOf(key)] }); return true;
+      case 'e': if (S.events.length) runAct('redraw-start', { id: S.events[0].id }); else toast('No comet or nova is cutting routes right now.', 'bad'); return true;
+    }
+    return false;
+  }
+
   addEventListener('keydown', e => {
-    if (e.key === 'Escape') { if (ui.modal) closeModal(); else if (ui.redraw) stopRedraw(); else ui.sel = null; }
-    else if (ui.started && !ui.modal && (e.key === 'c' || e.key === 'C') && !/^(INPUT|TEXTAREA)$/.test((e.target.tagName || ''))) openCodex();
+    ui.fast = e.shiftKey;
+    if (!e.key || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+    const t = e.target;
+    if (isTyping(t)) {
+      if (e.key === 'Escape') t.blur();
+      else if (e.key === 'Enter' && t.id === 'corp-rename') { e.preventDefault(); runAct('rename-corp'); }
+      return;
+    }
+    if (!ui.started) {
+      if (e.key === 'Enter' && !e.repeat && !isButtonLike(document.activeElement) && $('#start [data-act=continue]')) { e.preventDefault(); runAct('continue'); }
+      return;
+    }
+    const kk = e.key, key = kk.length === 1 ? kk.toLowerCase() : kk, d = digitOf(e), shift = e.shiftKey, mv = moveAction(e);
+    if (isButtonLike(document.activeElement) && (kk === ' ' || kk === 'Enter')) return; // a button reached with Tab keeps its own Space/Enter
+    if (e.repeat) { if (mv && !ui.modal) e.preventDefault(); return; } // holding a key repeats nothing but the camera
+    if (kk === 'Escape') { escapeKey(); handled(e); return; }
+    if (ui.modal) { if (modalKey(key, d) || windowKey(key)) handled(e); return; }
+    if (ui.redraw) {
+      if (key === 'e') stopRedraw();
+      else if (key === 'h') runAct('redraw-hint');
+      else if (mv) ui.held.set(e.code, mv);
+      else if (!windowKey(key)) return;
+      handled(e); return;
+    }
+    if (mv) { ui.held.set(e.code, mv); handled(e); return; }
+    if (mapKey(key, d, shift) || windowKey(key)) handled(e);
   });
+  addEventListener('keyup', e => { ui.held.delete(e.code); ui.fast = e.shiftKey; });
+  addEventListener('blur', () => ui.held.clear());
 
   // ---------------------------------------------------------------- log -> toasts
   function pumpLog() {
@@ -944,6 +1206,12 @@
       sec += gap;
       if (ui.flashes.length && now - ui.flashes[0].t > 1000) ui.flashes.shift();
       ui.frontier = G.frontier();
+      if (ui.held.size && !ui.modal) { // arrow keys pan, + and - zoom, smoothly for as long as they are held
+        const dt = Math.min(0.1, gap), acts = new Set(ui.held.values()), sp = (ui.fast ? 1600 : 650) * dt;
+        const dx = (acts.has('left') ? 1 : 0) - (acts.has('right') ? 1 : 0), dy = (acts.has('up') ? 1 : 0) - (acts.has('down') ? 1 : 0), z = (acts.has('in') ? 1 : 0) - (acts.has('out') ? 1 : 0);
+        if (dx || dy) sky.pan(dx * sp, dy * sp);
+        if (z) sky.zoomBy(Math.pow(2.2, z * dt));
+      }
       sky.render(now, ui);
       renderHud(); renderPanel(); renderBanner();
       if (sec > 1) {
