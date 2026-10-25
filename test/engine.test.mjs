@@ -167,7 +167,7 @@ test('old v1 saves migrate (wonder fields are dropped)', () => {
   old.version = 1; old.projects = [{ star: 0, remaining: 5, dur: 10 }]; old.wonderDone = { 3: 1 };
   const H = Engine.create(SKY);
   H.load(old);
-  assert.equal(H.state.version, 2);
+  assert.equal(H.state.version, Engine.SAVE_VERSION);
   assert.equal(H.state.projects, undefined);
   H.catchUp(100);
 });
@@ -243,35 +243,60 @@ test('quiz: every question kind builds valid, unambiguous questions', () => {
   for (const kinds of Object.values(Quiz.create(G).KINDS)) kinds.forEach(k => assert.ok(seenKinds.has(k), 'kind generated: ' + k));
 });
 
-test('quiz: rewards, first-time bonus, cooldown, streaks, perfect round and learning', () => {
+test('quiz: spaced repetition needs 10 spaced correct answers; early answers do not count', () => {
   let t = 1e12;
   const G = mk('Sirius', 4);
   const QZ = Quiz.create(G, { rng: seeded(9), now: () => t });
+  const subj = { cat: 'const', id: 5 };
+  const mkQ = () => ({ kind: 'x', cat: 'const', subject: subj, prompt: 'p', options: [{ text: 'a' }, { text: 'b' }], answer: 0, explain: 'e' });
+  const one = (choice = 0) => { const r = { cat: 'const', qs: [mkQ()], i: 0, correct: 0, streak: 0, best: 0, earned: { starlight: 0, insight: 0 }, answers: [], done: false }; return QZ.answer(r, choice); };
   const before = G.state.starlight;
-  let r = QZ.startRound('const');
-  const first = QZ.answer(r, r.qs[0].answer);
-  assert.ok(first.correct && first.reward.starlight > 0 && first.reward.item === Quiz.REWARD.firstTime);
+  const first = one();
+  assert.ok(first.correct && first.counted && first.box === 1 && first.reward.item === Quiz.REWARD.firstTime);
   assert.ok(G.state.starlight > before);
-  const wrong = QZ.answer(r, (r.qs[1].answer + 1) % r.qs[1].options.length);
-  assert.ok(!wrong.correct && wrong.reward.starlight === 0);
-  assert.equal(r.streak, 0);
-  // same subject again straight away pays only a trickle; after the cooldown it pays full
-  const subj = r.qs[0].subject;
-  const mkQ = () => ({ kind: 'x', cat: subj.cat, subject: subj, prompt: 'p', options: [{ text: 'a' }, { text: 'b' }], answer: 0, explain: 'e' });
-  let rr = { cat: 'const', qs: [mkQ(), mkQ()], i: 0, correct: 0, streak: 0, best: 0, earned: { starlight: 0, insight: 0 }, answers: [], done: false };
-  const soon = QZ.answer(rr, 0);
-  assert.equal(soon.reward.item, Quiz.REWARD.tooSoon);
-  t += 7 * 3600 * 1000;
-  const later = QZ.answer(rr, 0);
-  assert.equal(later.reward.item, Quiz.REWARD.repeat);
-  assert.ok(later.reward.streak > 1, 'streak multiplier');
-  assert.ok(rr.done && rr.bonus, 'perfect round bonus paid');
-  assert.ok(QZ.learned(subj.cat, subj.id), 'two correct answers = learned');
+  // straight away: pays a trickle, does not advance
+  const soon = one();
+  assert.ok(soon.correct && !soon.counted && soon.box === 1 && soon.reward.item === Quiz.REWARD.tooSoon);
+  assert.ok(soon.nextReviewMs > 0);
+  // a wrong answer drops two boxes (never below 0)
+  const wrong = one(1);
+  assert.ok(!wrong.correct && wrong.box === 0);
+  // work through the schedule: each review waits for its interval
+  let learnedAt = null, counted = 0;
+  for (let n = 0; n < 40 && learnedAt === null; n++) {
+    t += (QZ.INTERVALS[QZ.boxOf('const', 5)] || 0) + 1;
+    const r = one();
+    if (r.counted) counted++;
+    if (r.learnedNow) learnedAt = n;
+  }
+  assert.equal(QZ.boxOf('const', 5), Quiz.LEARN_BOX);
+  assert.ok(QZ.learned('const', 5), 'learned after the full schedule');
+  assert.equal(counted, Quiz.LEARN_BOX, 'exactly 10 counting reviews from a fresh start');
+  // it takes real time: the schedule spans more than a week
+  assert.ok(QZ.INTERVALS.slice(1, Quiz.LEARN_BOX).reduce((a, b) => a + b, 0) > 7 * 86400e3);
   const st = G.state.quiz.stats;
-  assert.ok(st.answered >= 4 && st.correct >= 3 && st.rounds >= 1 && st.perfect >= 1 && st.bestStreak >= 2);
-  // save round-trip keeps quiz progress
+  assert.ok(st.answered >= 13 && st.correct >= 12 && st.bestStreak >= 1);
   const H = Engine.create(SKY); H.load(JSON.parse(G.serialize()));
   assert.equal(H.state.quiz.stats.correct, st.correct);
+});
+
+test('quiz: rounds pay a perfect-round bonus and due items are asked first', () => {
+  let t = 1e12;
+  const G = mk('Sirius', 6);
+  const QZ = Quiz.create(G, { rng: seeded(3), now: () => t });
+  const r = QZ.startRound('const');
+  const s0 = G.state.starlight;
+  r.qs.forEach(q => QZ.answer(r, q.answer));
+  assert.ok(r.done && r.bonus && r.bonus.starlight > 0, 'perfect round bonus');
+  assert.ok(G.state.starlight - s0 > r.earned.starlight, 'bonus paid on top');
+  // after answering, those five items are not due; a new round should prefer other items
+  const seen = new Set(r.qs.map(q => q.subject.id));
+  let overlap = 0, total = 0;
+  for (let k = 0; k < 20; k++) QZ.startRound('const').qs.forEach(q => { total++; if (seen.has(q.subject.id)) overlap++; });
+  assert.ok(overlap / total < 0.2, 'recently answered items are rarely repeated (' + overlap + '/' + total + ')');
+  // later they come due and rise again
+  t += 3 * 86400e3;
+  assert.ok(QZ.progress('const').due >= 5);
 });
 
 test('quiz: old saves without quiz data load', () => {
@@ -286,4 +311,162 @@ test('named stars: exactly the 20 most important', () => {
   assert.equal(named.length, 20);
   for (const n of ['Sirius', 'Polaris', 'Betelgeuse', 'Vega', 'Rigel']) assert.ok(named.includes(n), n);
   assert.ok(!named.includes('Algol') && !named.includes('Mira'));
+});
+
+// ---------------------------------------------------------------- hubs, routes, lanes
+function claimMany(G, ids, levels) { ids.forEach(i => { G.state.stars[i] = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0, ...(levels || {}) }; }); G.recalc(); }
+const regionOf = (G, from, hops) => { const seen = new Set([from]); let layer = [from]; for (let d = 0; d < hops; d++) { const nx = []; for (const u of layer) for (const { to } of G.adj[u]) if (!seen.has(to)) { seen.add(to); nx.push(to); } layer = nx; } return [...seen]; };
+
+test('hubs: need a developed star, then a Collection Hub banks output automatically', () => {
+  const G = mk('Sirius', 2);
+  const home = G.state.home;
+  const region = regionOf(G, home, 3);
+  claimMany(G, region);
+  G.state.starlight = 1e9; G.state.insight = 1e6;
+  assert.ok(!G.canBuildHub(home, 'collect').ok, 'star needs 3 upgrade levels first');
+  G.state.stars[home].r = 3; G.recalc();
+  assert.ok(!G.canBuildHub(home, 'bogus').ok);
+  assert.ok(G.buildHub(home, 'collect').ok);
+  assert.equal(G.state.hubs[home].lvl, 1);
+  assert.ok(!G.canBuildHub(home, 'yard').ok, 'one hub type per star');
+  const covered = G.d.coverage[home];
+  assert.ok(covered.length > 3 && covered.includes(home));
+  const cs = covered.find(i => i !== home);
+  assert.ok(Math.abs(G.d.auto[cs] - 0.5) < 1e-6);
+  // output now reaches the wallet without collecting
+  const w0 = G.state.starlight;
+  G.tick(600, false);
+  assert.ok(G.state.starlight - w0 > 0, 'wallet grows on its own');
+  assert.ok(G.state.stats.auto > 0);
+  // the stockpile only holds the un-banked half
+  G.tick(1e6, false);
+  assert.ok(Math.abs(G.state.stars[cs].s - G.stockCap(cs)) < 1e-6);
+  assert.ok(G.stockCap(cs) < G.d.rate[cs] * G.d.cap[cs]);
+  // level 2 reaches further and banks more; needs 6 levels
+  assert.ok(!G.canBuildHub(home, 'collect').ok);
+  G.state.stars[home].r = 5; G.state.stars[home].b = 1; G.recalc();
+  assert.ok(G.buildHub(home, 'collect').ok);
+  assert.ok(Math.abs(G.d.auto[cs] - 0.7) < 1e-6);
+  assert.ok(G.d.coverage[home].length >= covered.length);
+  // a cut route breaks the reach
+  const far = G.d.coverage[home].find(i => !G.adj[home].some(n => n.to === i) && i !== home);
+  if (far !== undefined) {
+    const n = G.adj[far].find(x => G.d.coverage[home].includes(x.to));
+    G.state.events.push({ id: 99, kind: 'comet', name: 'x', edges: G.adj[home].map(x => x.e), restored: [], remaining: 99, total: 99, hits: 0, misses: 0, hint: false, paid: 0, where: '', center: home });
+    G.recalc();
+    assert.equal(G.d.coverage[home].length, 1, 'with every route out of the hub cut, only the hub itself is covered');
+  }
+});
+
+test('hubs: shipyard adds slots, lab boosts insight, trade boosts routes', () => {
+  const G = mk('Sirius', 2);
+  const home = G.state.home, region = regionOf(G, home, 2);
+  claimMany(G, region);
+  region.forEach(i => { G.state.stars[i].o = 2; });
+  G.state.starlight = 1e12; G.state.insight = 1e9; G.state.stars[home].r = 3; G.recalc();
+  const slots0 = G.d.slots, ins0 = G.d.totalIns, rate0 = G.d.totalRate;
+  assert.ok(G.buildHub(home, 'yard').ok);
+  assert.equal(G.d.slots, slots0 + 1);
+  assert.ok(G.d.yardSpeed[home] > 0);
+  const other = region.find(i => i !== home);
+  G.state.stars[other].r = 3; G.recalc();
+  assert.ok(G.buildHub(other, 'lab').ok);
+  assert.ok(G.d.totalIns > ins0);
+  const third = region.find(i => i !== home && i !== other); G.state.stars[third].r = 3; G.recalc();
+  const r1 = G.d.totalRate;
+  assert.ok(G.buildHub(third, 'trade').ok);
+  assert.ok(G.d.totalRate > r1);
+});
+
+test('routes: upgrading raises trade output and speeds fleets; levels cap', () => {
+  const G = mk('Sirius', 2);
+  const home = G.state.home, nb = G.adj[home][0];
+  claimMany(G, [nb.to]);
+  G.state.starlight = 1e12;
+  const rate0 = G.d.totalRate, sec0 = G.travelSeconds(home, 5, false, nb.e);
+  assert.ok(G.upgradeRoute(nb.e).ok);
+  assert.ok(G.d.totalRate > rate0);
+  assert.ok(G.travelSeconds(home, 5, false, nb.e) < sec0);
+  G.upgradeRoute(nb.e); G.upgradeRoute(nb.e);
+  assert.equal(G.routeLevel(nb.e), G.ROUTE_MAX);
+  assert.ok(!G.upgradeRoute(nb.e).ok);
+  const far = G.adj.findIndex((a, i) => !G.state.stars[i] && !a.some(n => G.state.stars[n.to]));
+  const unclaimedEdge = G.adj[far][0].e;
+  assert.ok(!G.upgradeRoute(unclaimedEdge).ok, 'needs both stars claimed');
+});
+
+test('lanes: buildable links only between claimed stars, then act as real routes (and survive a save)', () => {
+  const G = mk('Sirius', 2);
+  const home = G.state.home;
+  const region = regionOf(G, home, 3);
+  claimMany(G, region);
+  G.state.starlight = 1e12;
+  const lane = region.map(i => G.buildableLanes(i).map(l => ({ a: i, ...l }))).flat()[0];
+  assert.ok(lane, 'a buildable lane exists within the region');
+  assert.ok(G.isBuildable(lane.e) && !G.edgeActive(lane.e));
+  assert.ok(!G.adj[lane.a].some(n => n.e === lane.e), 'not a route until built');
+  const routes0 = G.d.routes, rate0 = G.d.totalRate;
+  assert.ok(G.buildLane(lane.e).ok);
+  assert.ok(G.adj[lane.a].some(n => n.e === lane.e) && G.adj[lane.other].some(n => n.e === lane.e));
+  assert.equal(G.d.routes, routes0 + 1);
+  assert.ok(G.d.totalRate > rate0);
+  assert.ok(!G.buildLane(lane.e).ok, 'cannot build twice');
+  assert.ok(G.upgradeRoute(lane.e).ok, 'built lanes can be upgraded too');
+  const outside = SKY.edges.findIndex((e, i) => G.isBuildable(i) && !G.state.stars[e[0]]);
+  assert.ok(!G.buildLane(outside).ok, 'both ends must be claimed');
+  const H = Engine.create(SKY); H.load(JSON.parse(G.serialize()));
+  assert.ok(H.adj[lane.a].some(n => n.e === lane.e), 'built lane restored from save');
+  assert.equal(H.d.routes, G.d.routes);
+  // the base graph is untouched: a fresh game has no built lanes
+  const F = Engine.create(SKY); F.newGame(0);
+  assert.ok(!F.adj.some(a => a.some(n => F.isBuildable(n.e))));
+});
+
+test('quests: story quests complete from state and pay out once; contracts refresh', () => {
+  const Quests = require('../js/quests.js');
+  const G = mk('Sirius', 2);
+  const QU = Quests.create(G, { rng: seeded(5) });
+  let L = QU.list();
+  assert.equal(L.contracts.length, 3);
+  assert.equal(new Set(L.contracts.map(c => c.title)).size, 3);
+  assert.ok(L.story.length >= 5 && L.total >= 30);
+  assert.equal(QU.readyCount(), 0);
+  // claim five stars: "Claim 5 stars" completes
+  claimMany(G, regionOf(G, G.state.home, 2));
+  assert.ok(G.d.count >= 5);
+  assert.ok(QU.readyCount() >= 1);
+  const w0 = G.state.starlight;
+  const done = QU.list().story.find(q => q.done);
+  const r = QU.claim(done.id);
+  assert.ok(r.ok && G.state.starlight > w0);
+  assert.ok(!QU.claim(done.id).ok, 'cannot claim twice');
+  assert.ok(!QU.list().story.some(q => q.id === done.id), 'claimed quest leaves the list');
+  // a contract finishes when its counter moves past the baseline
+  const c = QU.list().contracts[0];
+  assert.equal(c.cur, 0);
+  const tm = QU.TEMPLATES.find(x => c.title === x.title(c.target));
+  assert.ok(tm, 'contract matches a template');
+  G.state.stats.claimed += 100; G.state.stats.upgrades += 100; G.state.stats.collects += 100; G.state.stats.routeUps += 100; G.state.stats.lanes += 100; G.state.stats.eventsDone += 100; G.state.quiz.stats.correct += 100;
+  const cs = QU.list().contracts.filter(x => x.done);
+  assert.ok(cs.length >= 1);
+  const before = QU.list().contracts.length;
+  assert.ok(QU.claim(cs[0].id).ok);
+  assert.equal(QU.list().contracts.length, before, 'a new contract replaces the finished one');
+  assert.ok(QU.rerollContract(QU.list().contracts[0].id));
+  // quests survive a save
+  const H = Engine.create(SKY); H.load(JSON.parse(G.serialize()));
+  assert.ok(H.state.quests.claimed[done.id]);
+  assert.equal(Quests.create(H).list().contracts.length, 3);
+});
+
+test('saves from v2 (before hubs and quests) load and gain the new fields', () => {
+  const G = mk();
+  const old = JSON.parse(G.serialize());
+  old.version = 2; delete old.hubs; delete old.built; delete old.routeLvl; delete old.quests; delete old.stats.collects; delete old.stats.auto;
+  const H = Engine.create(SKY); H.load(old);
+  assert.equal(H.state.version, Engine.SAVE_VERSION);
+  assert.deepEqual(H.state.hubs, {});
+  assert.equal(H.state.stats.collects, 0);
+  assert.ok(H.state.quests.claimed);
+  H.catchUp(100);
 });

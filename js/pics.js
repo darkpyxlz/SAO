@@ -1,6 +1,5 @@
-/* Procedural illustrations of deep-sky objects for the Messier catalogue and Sky School.
-   These are stylised renderings of each object *type* (seeded per object so every Messier number always
-   looks the same), not photographs. */
+/* Pictures of the Messier objects for the catalogue and Sky School: real photographs when available, with a
+   procedural illustration of the object *type* (seeded per object) as a placeholder and fallback. */
 (function () {
   'use strict';
   const R = 168; // internal resolution; scaled to the canvas size
@@ -199,21 +198,57 @@
     return img;
   }
 
+  // Real photographs live in img/messier/M<n>.jpg (see THIRD_PARTY.md for their provenance). While one loads, or if it
+  // is missing, the procedural illustration above is shown instead.
+  const PHOTO_DIR = 'img/messier/';
+  const photos = new Map();
+  function photo(n) {
+    let p = photos.get(n);
+    if (!p) {
+      p = { state: 'loading', img: new Image(), waiting: [] };
+      p.img.onload = () => { p.state = 'ok'; const w = p.waiting; p.waiting = []; w.forEach(cb => cb()); };
+      p.img.onerror = () => { p.state = 'fail'; p.waiting = []; };
+      p.img.src = PHOTO_DIR + 'M' + n + '.jpg';
+      photos.set(n, p);
+    }
+    return p;
+  }
   const cache = new Map();
-  function draw(canvas, M) {
+  function sizeCanvas(canvas) {
+    const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    return ctx;
+  }
+  function paintProcedural(canvas, M) {
     let c = cache.get(M.n);
     if (!c) {
       c = document.createElement('canvas'); c.width = R; c.height = R;
       c.getContext('2d').putImageData(render(M), 0, 0);
       cache.set(M.n, c);
     }
-    const w = canvas.clientWidth || canvas.width, h = canvas.clientHeight || canvas.height;
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    const ctx = sizeCanvas(canvas);
     const s = Math.max(canvas.width, canvas.height);
     ctx.drawImage(c, (canvas.width - s) / 2, (canvas.height - s) / 2, s, s);
   }
-  window.Pics = { draw, render };
+  function paintPhoto(canvas, img) { // letterboxed ("contain") on the night-sky background
+    const ctx = sizeCanvas(canvas);
+    ctx.fillStyle = '#04060e'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const k = Math.min(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
+    const w = img.naturalWidth * k, h = img.naturalHeight * k;
+    ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+  }
+  // opts.procedural forces the illustration (used in tests and when photos are switched off)
+  function draw(canvas, M, opts) {
+    canvas.dataset.pic = M.n;
+    if (opts && opts.procedural) return paintProcedural(canvas, M);
+    const p = photo(M.n);
+    if (p.state === 'ok') return paintPhoto(canvas, p.img);
+    paintProcedural(canvas, M);
+    if (p.state === 'loading') p.waiting.push(() => { if (canvas.isConnected && canvas.dataset.pic === String(M.n)) paintPhoto(canvas, p.img); });
+  }
+  function preload(nums) { nums.forEach(photo); }
+  window.Pics = { draw, render, preload, photoState: n => (photos.get(n) || { state: 'unknown' }).state };
 })();

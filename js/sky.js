@@ -268,20 +268,25 @@
       ctx.lineCap = 'round';
       for (let pass = 0; pass < 2; pass++) {
         for (let i = 0; i < E.length; i++) {
-          const a = E[i][0], b = E[i][1], lane = E[i][2] < 0;
+          if (!G.edgeActive(i)) continue; // buildable lanes only show once built
+          const a = E[i][0], b = E[i][1], built = E[i][2] === -2, lane = E[i][2] < 0;
           const ca = !!S.stars[a], cb = !!S.stars[b];
           const both = ca && cb;
           if (evEdges.has(i)) continue; // cut routes vanish (see hints below)
           if ((pass === 0) === both) continue; // faint edges first, then active ones
+          const rl = S.routeLvl[i] || 0;
           ctx.beginPath(); lineBetween(a, b);
-          if (lane) {
-            ctx.setLineDash([2, 5]);
-            ctx.strokeStyle = both ? 'rgba(143,180,255,.38)' : (ca || cb) ? 'rgba(143,180,255,.14)' : 'rgba(143,180,255,.05)';
-            ctx.lineWidth = 1;
+          if (built) {
+            ctx.setLineDash([7, 3]);
+            ctx.strokeStyle = 'rgba(126,226,168,' + (0.55 + 0.12 * rl).toFixed(2) + ')'; ctx.lineWidth = 1.5 + rl * 0.9;
+          } else if (lane) {
+            ctx.setLineDash(rl ? [] : [2, 5]);
+            ctx.strokeStyle = both ? (rl ? 'rgba(255,225,160,.6)' : 'rgba(143,180,255,.38)') : (ca || cb) ? 'rgba(143,180,255,.14)' : 'rgba(143,180,255,.05)';
+            ctx.lineWidth = both ? 1 + rl * 0.9 : 1;
           } else {
             ctx.setLineDash([]);
-            ctx.strokeStyle = both ? 'rgba(190,215,255,.85)' : (ca || cb) ? 'rgba(160,185,240,.3)' : 'rgba(160,185,240,.13)';
-            ctx.lineWidth = both ? 1.6 : 1;
+            ctx.strokeStyle = both ? (rl ? 'rgba(255,230,170,' + (0.8 + 0.06 * rl).toFixed(2) + ')' : 'rgba(190,215,255,.85)') : (ca || cb) ? 'rgba(160,185,240,.3)' : 'rgba(160,185,240,.13)';
+            ctx.lineWidth = both ? 1.6 + rl * 0.9 : 1;
           }
           ctx.stroke();
         }
@@ -294,6 +299,19 @@
           ctx.setLineDash([4, 5]); ctx.strokeStyle = 'rgba(255,190,120,.55)'; ctx.lineWidth = 1.4;
           for (const e of ev.edges) if (!ev.restored.includes(e)) { ctx.beginPath(); lineBetween(E[e][0], E[e][1]); ctx.stroke(); }
           ctx.setLineDash([]);
+        }
+      }
+      // buildable lanes from the selected star, and the reach of a selected hub
+      if (ui.sel && ui.sel.type === 'star' && S.stars[ui.sel.i]) {
+        const si = ui.sel.i;
+        ctx.setLineDash([3, 5]); ctx.strokeStyle = 'rgba(126,226,168,.5)'; ctx.lineWidth = 1.3;
+        for (const bl of G.buildableLanes(si)) { ctx.beginPath(); lineBetween(si, bl.other); ctx.stroke(); }
+        ctx.setLineDash([]);
+        const hub = S.hubs[si];
+        if (hub && D.coverage[si]) {
+          ctx.strokeStyle = G.HUB_TYPES[hub.type].color; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.55;
+          for (const i of D.coverage[si]) { if (!svis[i]) continue; ctx.beginPath(); ctx.arc(sx[i], sy[i], 9 + Math.sin(t / 500 + i) * 1.2, 0, TAU); ctx.stroke(); }
+          ctx.globalAlpha = 1;
         }
       }
       // flashes (redraw feedback)
@@ -332,13 +350,24 @@
         if (claimed) {
           const s = S.stars[i];
           const lv = s.r + s.b + s.o;
-          if (lv >= 9) { ctx.strokeStyle = 'rgba(255,217,138,.9)'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, TAU); ctx.stroke(); }
-          else if (lv >= 3) { ctx.strokeStyle = 'rgba(255,217,138,.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, TAU); ctx.stroke(); }
-          const cap = D.rate[i] * D.cap[i];
+          const rings = Math.min(5, Math.floor(lv / 3)); // one ring per three upgrade levels
+          for (let k = 0; k < rings; k++) {
+            ctx.strokeStyle = 'rgba(255,' + (217 + 8 * k) + ',' + (138 + 24 * k) + ',' + (0.42 + 0.1 * k).toFixed(2) + ')';
+            ctx.lineWidth = k === 4 ? 1.6 : 1;
+            ctx.beginPath(); ctx.arc(x, y, r + 3 + k * 2.6, 0, TAU); ctx.stroke();
+          }
+          const hub = S.hubs[i];
+          if (hub) { // hexagon in the hub's colour
+            const hr = r + 5 + rings * 2.6 + 2;
+            ctx.strokeStyle = G.HUB_TYPES[hub.type].color; ctx.lineWidth = 1.2 + hub.lvl * 0.5; ctx.beginPath();
+            for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3; ctx[k ? 'lineTo' : 'moveTo'](x + Math.cos(a) * hr, y + Math.sin(a) * hr); }
+            ctx.closePath(); ctx.stroke();
+          }
+          const cap = G.stockCap(i);
           if (cap > 0 && s.s >= cap * 0.9) {
             const pulse = 0.5 + 0.5 * Math.sin(t / 380 + i);
             ctx.strokeStyle = 'rgba(255,217,138,' + (0.5 + 0.4 * pulse).toFixed(2) + ')'; ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.arc(x, y, r + 6 + pulse * 2, 0, TAU); ctx.stroke();
+            ctx.beginPath(); ctx.arc(x, y, r + 16 + pulse * 2, 0, TAU); ctx.stroke();
           } else if (s.s + s.i > 0 && cap > 0 && s.s >= cap * 0.35) {
             ctx.fillStyle = 'rgba(255,217,138,.9)'; ctx.beginPath(); ctx.arc(x + r + 3, y - r - 3, 2, 0, TAU); ctx.fill();
           }

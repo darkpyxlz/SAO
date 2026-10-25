@@ -8,7 +8,7 @@
   const AUTOSAVE = 'firmament.autosave.v1';
   const SLOT = n => 'firmament.slot' + n + '.v1';
 
-  const ui = { sel: null, redraw: null, hint: false, flashes: [], frontier: new Set(), started: false, modal: null, tab: null, filter: {}, lastPanel: '', lastLog: 0, hover: null };
+  const ui = { lastReady: 0, sel: null, redraw: null, hint: false, flashes: [], frontier: new Set(), started: false, modal: null, tab: null, filter: {}, lastPanel: '', lastLog: 0, hover: null };
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = n => G.fmt(n);
   function dur(sec) {
@@ -26,6 +26,7 @@
   const KIND_ICON = { globular: '⊕', open: '⁘', nebula: '▣', galaxy: '◯', other: '◇' };
 
   const QZ = Quiz.create(G);
+  const QU = Quests.create(G);
   const sky = Sky.create(canvas, G, {
     onClick: (x, y) => handleMapClick(x, y),
     onHover: (x, y) => handleHover(x, y),
@@ -184,6 +185,12 @@
     if (!G.state.events.find(e => e.id === R.id)) stopRedraw();
   }
 
+  // spaced-repetition progress: 'learned' or k/10 reviews done
+  function learnBadge(cat, id) {
+    if (QZ.learned(cat, id)) return '<span class="badge cyan">learned</span>';
+    const b = QZ.boxOf(cat, id);
+    return b > 0 ? '<span class="badge" title="Spaced reviews completed">' + b + '/' + QZ.LEARN_BOX + '</span>' : '';
+  }
   // ---------------------------------------------------------------- pictures and figures
   function drawVisuals(root) {
     root.querySelectorAll('canvas[data-vis]').forEach(cv => {
@@ -207,7 +214,14 @@
       const dis = D.dis[e];
       const comp = G.cls[i] !== G.cls[to];
       const tag = dis ? '<span class="badge red">cut</span>' : cl && S.stars[i] ? '<span class="badge ' + (comp ? 'green' : '') + '">' + (comp ? '+complementary' : '+same colour') + '</span>' : '';
-      h += '<div class="row tiny"><span class="grow"><span class="dot" style="background:' + rgbOf(to) + '"></span><span class="link" data-act="sel-star" data-i="' + to + '">' + esc(SKY.stars[to][6]) + '</span> <span class="muted">' + G.edgeLen[e].toFixed(1) + '°' + (lane ? ' lane' : '') + '</span></span>' + (cl ? '' : '<span class="muted">○</span>') + tag + '</div>';
+      const both = cl && S.stars[i], rl = G.routeLevel(e);
+      let up = '';
+      if (both && !dis) {
+        const cost = G.routeUpgradeCost(e);
+        up = cost === null ? '<span class="badge gold">max</span>' : '<button class="btn small" title="Stronger trade bonus and faster fleets on this route" data-act="upgrade-route" data-e="' + e + '"' + (S.starlight >= cost ? '' : ' disabled') + '>\u2726 ' + fmt(cost) + '</button>';
+      }
+      const pips = both ? ' <span class="pips" title="Route level">' + [0, 1, 2].map(k => '<i class="' + (k < rl ? 'on' : '') + '"></i>').join('') + '</span>' : '';
+      h += '<div class="row tiny"><span class="grow"><span class="dot" style="background:' + rgbOf(to) + '"></span><span class="link" data-act="sel-star" data-i="' + to + '">' + esc(SKY.stars[to][6]) + '</span> <span class="muted">' + G.edgeLen[e].toFixed(1) + '°' + (SKY.edges[e][2] === -2 ? ' built lane' : lane ? ' lane' : '') + '</span>' + pips + '</span>' + (cl ? '' : '<span class="muted">○</span>') + tag + up + '</div>';
     }
     return h;
   }
@@ -215,6 +229,40 @@
     if (p.type === 'upgrade') return 'Raise ' + G.TRACK_INFO[p.track].name + ' to level ' + p.level;
     if (p.type === 'expand') return 'Claim a neighbouring star';
     return 'Collect a stockpile that is at least ' + Math.round(p.fraction * 100) + '% full';
+  }
+  function hubSection(i) {
+    const S = G.state, hub = S.hubs[i];
+    let h = '<div class="p-sec"><h4>Hub</h4>';
+    if (hub) {
+      const info = G.HUB_TYPES[hub.type], sum = G.hubSummary(i);
+      h += '<div class="row"><span style="color:' + info.color + ';font-size:18px">' + info.icon + '</span><b class="grow">' + info.name + '</b><span class="badge">level ' + hub.lvl + ' / ' + G.HUB_MAX + '</span></div>';
+      h += '<div class="muted tiny">' + esc(info.blurb) + '</div><div class="tiny" style="margin-top:3px">' + esc(sum.text.charAt(0).toUpperCase() + sum.text.slice(1)) + '.</div>';
+      const c = G.hubCost(i, hub.type);
+      if (c) {
+        const chk = G.canBuildHub(i, hub.type);
+        h += '<div class="row tiny"><span class="gold">\u2726 ' + fmt(c.starlight) + '</span><span class="cyan">\u25c9 ' + fmt(c.insight) + '</span><span class="grow"></span><button class="btn small primary" data-act="build-hub" data-i="' + i + '" data-type="' + hub.type + '"' + (chk.ok ? '' : ' disabled') + '>Upgrade to level ' + c.next + '</button></div>';
+        if (!chk.ok) h += '<div class="muted tiny">' + esc(chk.msg) + '</div>';
+      } else h += '<div class="muted tiny">Fully upgraded.</div>';
+    } else if (G.lvl(i) < 3) {
+      h += '<div class="muted tiny">Develop this star to 3 upgrade levels (it has ' + G.lvl(i) + ') to build a hub here. Hubs reach out along your trade routes and manage a whole region.</div>';
+    } else {
+      h += '<div class="muted tiny" style="margin-bottom:6px">Build one hub on this star. Its reach follows intact routes between claimed stars.</div>';
+      for (const type of Object.keys(G.HUB_TYPES)) {
+        const info = G.HUB_TYPES[type], c = G.hubCost(i, type), chk = G.canBuildHub(i, type);
+        h += '<div class="hubopt"><div class="row"><span style="color:' + info.color + ';font-size:17px">' + info.icon + '</span><b class="grow">' + info.name + '</b><button class="btn small" data-act="build-hub" data-i="' + i + '" data-type="' + type + '"' + (chk.ok ? '' : ' disabled') + '>Build</button></div><div class="muted tiny">' + esc(info.blurb) + '</div><div class="row tiny"><span class="gold">\u2726 ' + fmt(c.starlight) + '</span><span class="cyan">\u25c9 ' + fmt(c.insight) + '</span></div></div>';
+      }
+    }
+    return h + '</div>';
+  }
+  function laneSection(i) {
+    const lanes = G.buildableLanes(i);
+    if (!lanes.length) return '';
+    let h = '<div class="p-sec"><h4>Build new routes</h4><div class="muted tiny" style="margin-bottom:4px">Dotted green lines on the map. A new lane adds a trade route and a shortcut for fleets.</div>';
+    for (const l of lanes) {
+      const cost = G.laneCost(l.e), chk = G.canBuildLane(l.e);
+      h += '<div class="row tiny"><span class="grow"><span class="dot" style="background:' + rgbOf(l.other) + '"></span><span class="link" data-act="sel-star" data-i="' + l.other + '">' + esc(SKY.stars[l.other][6]) + '</span> <span class="muted">' + l.deg.toFixed(1) + '\u00b0</span></span><button class="btn small" data-act="build-lane" data-e="' + l.e + '"' + (chk.ok ? '' : ' disabled') + '>\u2726 ' + fmt(cost) + '</button></div>';
+    }
+    return h + '</div>';
   }
   function starPanel(i) {
     const S = G.state, D = G.d, st = SKY.stars[i], s = S.stars[i], con = SKY.consts[st[5]];
@@ -237,12 +285,14 @@
       h += '</div><div class="p-sec"><h4>Routes</h4>' + routeRows(i) + '</div>';
       return h;
     }
-    const cap = D.rate[i] * D.cap[i], icap = D.insRate[i] * D.cap[i];
+    const cap = G.stockCap(i), icap = G.insCap(i);
     h += '<div class="p-sec"><h4>Stockpile</h4><div class="bar"><i data-lv="bar" style="width:0%"></i></div>';
     h += '<div class="row tiny"><span class="gold" data-lv="stock">✦ 0</span><span class="muted" data-lv="cap"></span><span class="grow"></span>' + (icap > 0 ? '<span class="cyan" data-lv="ins">◉ 0</span>' : '') + '</div>';
     h += '<div class="row"><button class="btn gold grow" data-act="collect" data-i="' + i + '">Collect</button></div>';
     h += '<div class="row tiny muted"><span class="grow">Output</span><span data-lv="rate"></span></div>';
-    h += '<div class="muted tiny" data-lv="rbreak"></div></div>';
+    h += '<div class="muted tiny" data-lv="rbreak"></div>';
+    if (D.auto[i] > 0) h += '<div class="tiny cyan" style="margin-top:4px">\u27f3 ' + Math.round(D.auto[i] * 100) + '% of this star\u2019s output is banked automatically by a Collection Hub.</div>';
+    h += '</div>';
     // petition
     const pet = S.petitions.find(p => p.star === i);
     if (pet) h += '<div class="p-sec"><h4>Petition</h4><div class="row"><span class="grow">' + esc(petitionText(pet)) + '</span></div><div class="row tiny"><span class="gold">+' + fmt(pet.reward) + ' ✦</span><span class="cyan">+' + pet.insight + ' ◉</span><span class="grow"></span><button class="btn small ghost" data-act="dismiss-pet" data-id="' + pet.id + '">Dismiss</button></div></div>';
@@ -258,6 +308,7 @@
     }
     const lv = s.r + s.b + s.o;
     h += '<div class="muted tiny">Total ' + lv + ' · constellation counts as developed at ' + G.DEV_LEVELS + ' per star, mastered at ' + G.MASTER_LEVELS + '.</div></div>';
+    h += hubSection(i);
     // nearby messier
     const ms = G.messierFrom[i];
     if (ms.length) {
@@ -269,6 +320,7 @@
       h += '</div>';
     }
     h += '<div class="p-sec"><h4>Routes</h4>' + routeRows(i) + '</div>';
+    h += laneSection(i);
     return h;
   }
   function messierPanel(m) {
@@ -277,7 +329,7 @@
     h += '<div class="p-sub">' + KIND_ICON[M.kind] + ' ' + M.tname + ' · <span class="link" data-act="open-const" data-c="' + M.c + '">' + esc(con.name) + '</span> · mag ' + M.mag + (M.dim ? ' · ' + M.dim + '′' : '') + '</div>';
     const [pk, pv] = G.MESSIER_PERK[M.kind];
     const dev = vis && vis.dev;
-    if (vis) h += '<div class="p-pic"><canvas class="mpic" data-vis="messier:' + m + '"></canvas></div>';
+    if (vis) h += '<div class="p-pic"><canvas class="mpic" data-vis="messier:' + m + '"></canvas><div class="muted tiny" style="margin-top:3px">Photo via the messier-api package \u00b7 credits in Menu \u2192 About</div></div>';
     h += '<div class="p-sec"><h4>' + (vis ? 'Catalogued ' + dstr(vis.t) : 'Not yet visited') + '</h4>';
     if (vis && M.note) h += '<div class="lore">' + esc(M.note) + '</div>';
     h += '<div class="row"><span class="grow">' + esc(pk === 'slots' ? '+1 fleet slot per 3 globular clusters' : PERK_TXT(pk, pv * (dev ? 2 : 1))) + '</span>' + (dev ? '<span class="badge gold">doubled</span>' : '') + '</div>';
@@ -306,11 +358,11 @@
     // live values
     if (ui.sel.type === 'star' && G.state.stars[ui.sel.i]) {
       const i = ui.sel.i, s = G.state.stars[i], D = G.d;
-      const cap = D.rate[i] * D.cap[i], icap = D.insRate[i] * D.cap[i];
+      const cap = G.stockCap(i), icap = G.insCap(i);
       const q = k => el.querySelector('[data-lv="' + k + '"]');
       if (q('bar')) q('bar').style.width = (cap > 0 ? Math.min(100, s.s / cap * 100) : 0) + '%';
       if (q('stock')) q('stock').textContent = '✦ ' + fmt(s.s);
-      if (q('cap')) q('cap').textContent = '/ ' + fmt(cap) + ' · full in ' + (s.s >= cap ? 'now' : dur((cap - s.s) / D.rate[i]));
+      if (q('cap')) q('cap').textContent = '/ ' + fmt(cap) + ' · full in ' + (s.s >= cap ? 'now' : dur((cap - s.s) / Math.max(1e-9, D.rate[i] * (1 - D.auto[i]))));
       if (q('ins')) q('ins').textContent = '◉ ' + fmt(s.i) + ' / ' + fmt(icap);
       if (q('rate')) q('rate').textContent = '✦ ' + rateText(D.rate[i]);
       if (q('rbreak')) q('rbreak').textContent = 'base ' + rateText(G.baseRate[i]) + ' × radiance ' + (1 + 0.5 * s.r).toFixed(1) + ' × routes ' + D.routeMul[i].toFixed(2) + ' × empire ' + D.globalOut.toFixed(2);
@@ -352,6 +404,11 @@
     const idle = Math.max(0, D.slots - S.fleets.length);
     const canGo = idle > 0 && [...ui.frontier].some(t => G.canLaunchTo(t).ok);
     if (canGo) chips.push('<span class="chip" data-act="goto-frontier">➤ ' + idle + ' fleet' + (idle === 1 ? '' : 's') + ' idle</span>');
+    const ready = QU.readyCount();
+    if (ready) chips.unshift('<span class="chip gold" data-act="open-quests">\u2714 ' + ready + ' quest' + (ready === 1 ? '' : 's') + ' ready</span>');
+    const qb = $('#qbadge'); qb.hidden = !ready; qb.textContent = ready;
+    if (ready > ui.lastReady) toast('Quest complete! Open Quests to claim your reward.', 'gold');
+    ui.lastReady = ready;
     const html = chips.join('');
     if (html !== lastAttn) { el.innerHTML = html; lastAttn = html; }
   }
@@ -389,7 +446,7 @@
     (ui.modal.render || TAB_RENDER[ui.tab] || (() => ''))(body);
     if (ui.modal.keepScroll) body.scrollTop = keep;
   }
-  const CODEX_TABS = [['const', 'Constellations'], ['messier', 'Messier'], ['stars', 'Named stars'], ['chron', 'Chronicle']];
+  const CODEX_TABS = [['const', 'Constellations'], ['messier', 'Messier'], ['stars', 'Named stars'], ['hubs', 'Hubs'], ['chron', 'Chronicle']];
   function openCodex(tab) {
     openModal('Codex', CODEX_TABS, tab || 'const');
   }
@@ -414,7 +471,7 @@
         if (f === 'unexp' && cs.claimed) continue;
         if (f === 'dev' && !cs.developed) continue;
         if (f === 'master' && !cs.mastered) continue;
-        h += '<div class="card ' + (cs.mastered ? 'master' : cs.developed ? 'dev' : cs.claimed ? '' : 'locked') + '" data-act="open-const" data-c="' + c + '"><canvas data-chart="' + c + '"></canvas><div class="t"><span>' + esc(SKY.consts[c].name) + '</span></div><div class="s">' + consBadge(cs) + (QZ.learned('const', c) ? ' <span class="badge cyan">learned</span>' : '') + '</div>' + (cs.developed ? '<span class="stamp">' + (cs.mastered ? '★' : '✦') + '</span>' : '') + '</div>';
+        h += '<div class="card ' + (cs.mastered ? 'master' : cs.developed ? 'dev' : cs.claimed ? '' : 'locked') + '" data-act="open-const" data-c="' + c + '"><canvas data-chart="' + c + '"></canvas><div class="t"><span>' + esc(SKY.consts[c].name) + '</span></div><div class="s">' + consBadge(cs) + ' ' + learnBadge('const', c) + '</div>' + (cs.developed ? '<span class="stamp">' + (cs.mastered ? '★' : '✦') + '</span>' : '') + '</div>';
       }
       body.innerHTML = h + '</div>';
       body.querySelectorAll('canvas[data-chart]').forEach(cv => Sky.drawChart(cv, G, +cv.dataset.chart));
@@ -429,7 +486,7 @@
         if (f === 'seen' && !v) return; if (f === 'todo' && v) return;
         if (KIND_NAMES[f] && M.kind !== f) return;
         h += '<div class="mcard ' + (v ? 'visited' : 'locked') + '" data-act="goto-messier" data-i="' + m + '"><div class="row"><span class="n">M' + M.n + '</span><span class="grow"></span><span>' + KIND_ICON[M.kind] + '</span></div>';
-        if (v) h += '<canvas class="mthumb" data-vis="messier:' + m + '"></canvas><div><b>' + esc(M.alt || M.tname) + '</b>' + (QZ.learned('messier', m) ? ' <span class="badge cyan">learned</span>' : '') + '</div><div class="muted tiny">' + M.tname + ' · ' + esc(SKY.consts[M.c].name) + ' · mag ' + M.mag + '</div><div class="note">' + esc(M.note) + '</div><div class="row tiny">' + '<span class="muted">' + dstr(v.t) + '</span>' + (v.dev ? '<span class="badge gold">doubled</span>' : '') + '</div>';
+        if (v) h += '<canvas class="mthumb" data-vis="messier:' + m + '"></canvas><div><b>' + esc(M.alt || M.tname) + '</b>' + ' ' + learnBadge('messier', m) + '</div><div class="muted tiny">' + M.tname + ' · ' + esc(SKY.consts[M.c].name) + ' · mag ' + M.mag + '</div><div class="note">' + esc(M.note) + '</div><div class="row tiny">' + '<span class="muted">' + dstr(v.t) + '</span>' + (v.dev ? '<span class="badge gold">doubled</span>' : '') + '</div>';
         else h += '<div class="muted">' + M.tname + '</div><div class="muted tiny">' + (reach ? '<span class="good">reachable</span>' : 'beyond your reach') + '</div>';
         h += '</div>';
       });
@@ -445,14 +502,28 @@
       h += '<table class="t"><tr><th>Name</th><th>Constellation</th><th>Class</th><th>Mag</th><th></th><th></th></tr>';
       for (const i of named) {
         const st = SKY.stars[i], cl = !!S.stars[i];
-        h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(2) + '</td><td>' + (cl ? '<span class="badge green">claimed</span>' : '<span class="badge">unclaimed</span>') + '</td><td>' + (QZ.learned('star', i) ? '<span class="badge cyan">learned</span>' : '') + '</td></tr>';
+        h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(2) + '</td><td>' + (cl ? '<span class="badge green">claimed</span>' : '<span class="badge">unclaimed</span>') + '</td><td>' + learnBadge('star', i) + '</td></tr>';
       }
       body.innerHTML = h + '</table>';
+    },
+    hubs(body) {
+      const S = G.state, list = Object.keys(S.hubs).map(Number).sort((a, b) => S.hubs[b].lvl - S.hubs[a].lvl || SKY.stars[a][3] - SKY.stars[b][3]);
+      let h = '<div class="stat-grid"><div class="stat"><b>' + list.length + '</b><span>hubs</span></div><div class="stat"><b class="gold">\u2726 ' + fmt(S.stats.auto || 0) + '</b><span>banked automatically</span></div><div class="stat"><b>' + S.stats.lanes + '</b><span>lanes built</span></div><div class="stat"><b>' + S.stats.routeUps + '</b><span>route upgrades</span></div></div>';
+      if (!list.length) h += '<p class="muted">No hubs yet. Upgrade any star to 3 levels, select it and choose a hub to build. Collection Hubs bank a share of a whole region\u2019s output for you, Shipyard Hubs add fleet slots, Research Hubs boost Insight and Trade Hubs strengthen routes.</p>';
+      else {
+        h += '<table class="t"><tr><th>Star</th><th>Hub</th><th>Level</th><th>Reach</th></tr>';
+        for (const i of list) {
+          const hub = S.hubs[i], info = G.HUB_TYPES[hub.type], sum = G.hubSummary(i);
+          h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td>' + esc(SKY.stars[i][6]) + ' <span class="muted">' + esc(SKY.consts[SKY.stars[i][5]].id) + '</span></td><td><span style="color:' + info.color + '">' + info.icon + '</span> ' + info.name + '</td><td>' + hub.lvl + ' / ' + G.HUB_MAX + '</td><td class="muted">' + esc(sum.text) + '</td></tr>';
+        }
+        h += '</table>';
+      }
+      body.innerHTML = h;
     },
     chron(body) {
       const S = G.state, st = S.stats;
       let h = '<div class="stat-grid">';
-      const cards = [[Object.keys(S.stars).length + ' / ' + SKY.stars.length, 'stars claimed'], [Object.keys(S.messier).length + ' / 110', 'Messier catalogued'], [Object.keys(S.devConst).length + ' / 88', 'constellations developed'], [fmt(st.collected), 'Starlight collected'], [st.eventsDone, 'events resolved'], [st.perfect, 'perfect redraws'], [st.restoredRoutes, 'routes redrawn'], [st.petitionsDone, 'petitions answered'], [S.quiz.stats.answered ? Math.round(S.quiz.stats.correct / S.quiz.stats.answered * 100) + '%' : '·', 'quiz accuracy (' + S.quiz.stats.answered + ' answers)'], [S.quiz.stats.perfect, 'perfect quiz rounds'], [S.quiz.stats.bestStreak, 'best quiz streak'], [dur((Date.now() - S.created) / 1000), 'empire age']];
+      const cards = [[Object.keys(S.stars).length + ' / ' + SKY.stars.length, 'stars claimed'], [Object.keys(S.messier).length + ' / 110', 'Messier catalogued'], [Object.keys(S.devConst).length + ' / 88', 'constellations developed'], [fmt(st.collected), 'Starlight collected'], [st.eventsDone, 'events resolved'], [st.perfect, 'perfect redraws'], [st.restoredRoutes, 'routes redrawn'], [st.petitionsDone, 'petitions answered'], [Object.keys(S.hubs).length, 'hubs built'], [fmt(st.auto || 0), 'Starlight auto-collected'], [Object.keys(S.quests.claimed).length, 'story quests completed'], [S.quiz.stats.answered ? Math.round(S.quiz.stats.correct / S.quiz.stats.answered * 100) + '%' : '·', 'quiz accuracy (' + S.quiz.stats.answered + ' answers)'], [S.quiz.stats.perfect, 'perfect quiz rounds'], [S.quiz.stats.bestStreak, 'best quiz streak'], [dur((Date.now() - S.created) / 1000), 'empire age']];
       cards.forEach(([b, l]) => h += '<div class="stat"><b>' + b + '</b><span>' + l + '</span></div>');
       h += '</div>';
       const devs = Object.keys(S.devConst).map(Number).sort((a, b) => S.devConst[a] - S.devConst[b]);
@@ -478,7 +549,7 @@
     const S = G.state, cons = SKY.consts[c], cs = G.consStatus(c);
     const dev = cs.developed;
     let h = '<div class="cpage"><div><canvas class="big" id="cchart"></canvas><div class="muted tiny" style="margin-top:6px">Tap a star to find it on the map.</div></div><div>';
-    h += '<div class="row"><button class="btn small" data-act="open-codex">\u2190 Codex</button><span class="muted">' + (cons.en !== cons.name ? esc(cons.en) : '') + '</span><span class="grow"></span>' + (QZ.learned('const', c) ? '<span class="badge cyan">learned</span> ' : '') + consBadge(cs) + '</div>';
+    h += '<div class="row"><button class="btn small" data-act="open-codex">\u2190 Codex</button><span class="muted">' + (cons.en !== cons.name ? esc(cons.en) : '') + '</span><span class="grow"></span>' + learnBadge('const', c) + ' ' + consBadge(cs) + '</div>';
     h += cs.claimed ? '<p class="lore">' + esc(cons.lore) + '</p>' : '<p class="lore locked-lore">Unexplored. Claim a star here to learn its story.</p>';
     h += '<div class="p-sec" style="padding:8px 0"><h4>Bonus</h4>';
     h += '<div class="row"><span class="grow">Developed: every star claimed with ' + G.DEV_LEVELS + '+ levels</span>' + (dev ? '<span class="badge gold">+' + (G.CFG.devBonus * 100).toFixed(1) + '% Starlight</span>' : '<span class="muted tiny">+' + (G.CFG.devBonus * 100).toFixed(1) + '%</span>') + '</div>';
@@ -513,6 +584,25 @@
   let saveTimer = null;
   function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(autosave, 800); }
 
+  // ---------------------------------------------------------------- quests
+  function openQuests() { ui.modal = { title: 'Quests', tabs: null, keepScroll: true, render: renderQuests }; ui.tab = null; $('#modal').hidden = false; renderModal(); }
+  const fint = n => (n >= 1e4 ? fmt(n) : String(Math.floor(n)));
+  function questRow(q) {
+    const pctDone = Math.min(100, q.cur / q.target * 100);
+    return '<div class="quest' + (q.done ? ' done' : '') + '"><div class="row"><b class="grow">' + esc(q.title) + '</b>' + (q.chapter ? '<span class="badge">' + esc(q.chapter) + '</span>' : '') + '</div>' +
+      (q.desc ? '<div class="muted tiny">' + esc(q.desc) + '</div>' : '') +
+      '<div class="bar"><i style="width:' + pctDone + '%"></i></div>' +
+      '<div class="row tiny"><span class="muted">' + fint(q.cur) + ' / ' + fint(q.target) + '</span><span class="grow"></span><span class="gold">+' + fmt(q.reward.starlight) + ' \u2726</span><span class="cyan">+' + fmt(q.reward.insight) + ' \u25c9</span>' +
+      (q.done ? '<button class="btn small gold" data-act="quest-claim" data-id="' + q.id + '">Claim</button>' : q.kind === 'contract' ? '<button class="btn small ghost" data-act="quest-reroll" data-id="' + q.id + '" title="Swap for a different contract">\u27f2</button>' : '') + '</div></div>';
+  }
+  function renderQuests(body) {
+    const L = QU.list();
+    let h = '<p class="muted" style="margin-top:0;max-width:640px">Contracts are short repeatable jobs that refresh as you finish them. Story quests are long goals across the whole game. Rewards are worth minutes of your income, so they keep up as you grow.</p>';
+    h += '<h3>Contracts</h3><div class="quests">' + L.contracts.map(questRow).join('') + '</div>';
+    h += '<h3>Story <span class="muted tiny">' + L.claimedCount + ' / ' + L.total + ' completed' + (L.later ? ' \u00b7 ' + L.later + ' more to unlock' : '') + '</span></h3><div class="quests">' + L.story.map(questRow).join('') + '</div>';
+    body.innerHTML = h;
+  }
+
   // ---------------------------------------------------------------- Sky School (minigames)
   ui.school = { view: 'menu', round: null, shown: null, learned: [] };
   function openSchool() {
@@ -525,12 +615,13 @@
     const sc = ui.school, S = G.state, st = S.quiz.stats;
     if (sc.view === 'menu') {
       const base = QZ.rewardBase();
-      let h = '<p class="muted" style="margin-top:0;max-width:640px">Short rounds of five questions. Every correct answer pays Starlight and Insight worth about ' + QZ.REWARD.seconds / 60 + ' minutes of your income, <b>×' + QZ.REWARD.firstTime + '</b> the first time you get something right, plus a streak bonus and <b>+' + QZ.REWARD.perfectBonus * 100 + '%</b> for a perfect round. Answering something you already know pays half, and only a trickle if you answered it in the last 6 hours. Get something right twice and it is marked <span class="badge cyan">learned</span> in the codex.</p>';
+      let h = '<p class="muted" style="margin-top:0;max-width:680px">Short rounds of five questions. Each correct answer pays Starlight and Insight worth about ' + QZ.REWARD.seconds / 60 + ' minutes of your income (<b>×' + QZ.REWARD.firstTime + '</b> the first time you get something right, plus streak and perfect-round bonuses).</p>' +
+        '<div class="callout"><b>Spaced repetition.</b> Nothing is <span class="badge cyan">learned</span> after one lucky answer. Each item needs <b>' + QZ.LEARN_BOX + ' correct answers</b>, and each one only counts once its review is due: ' + QZ.INTERVALS.slice(1, QZ.LEARN_BOX).map(ms => ms < 3600e3 ? Math.round(ms / 60e3) + ' min' : ms < 86400e3 ? Math.round(ms / 3600e3) + ' h' : Math.round(ms / 86400e3) + ' d').join(' \u2192 ') + '. Answering early still pays a trickle but doesn\u2019t advance it; a wrong answer sends it back two steps. Items that are due come up most often.</div>';
       h += '<div class="stat-grid"><div class="stat"><b>' + st.answered + '</b><span>answered</span></div><div class="stat"><b>' + (st.answered ? Math.round(st.correct / st.answered * 100) + '%' : '·') + '</b><span>accuracy</span></div><div class="stat"><b>' + st.bestStreak + '</b><span>best streak</span></div><div class="stat"><b>' + st.perfect + ' / ' + st.rounds + '</b><span>perfect rounds</span></div><div class="stat"><b class="gold">✦ ' + fmt(base.starlight) + '</b><span>per correct answer now</span></div></div>';
       h += '<div class="school-cats">';
       for (const cat of ['const', 'star', 'messier', 'mixed']) {
         const info = Quiz.CATS[cat], pr = cat === 'mixed' ? null : QZ.progress(cat);
-        h += '<button class="school-cat" data-act="school-start" data-cat="' + cat + '"><b>' + info.name + '</b><span class="muted">' + info.blurb + '</span>' + (pr ? '<span class="tiny ' + (pr.learned ? 'cyan' : 'muted') + '">learned ' + pr.learned + ' / ' + pr.total + (pr.extra ? ' (+' + pr.extra + ' designations)' : '') + '</span>' : '<span class="tiny muted">all three kinds</span>') + '</button>';
+        h += '<button class="school-cat" data-act="school-start" data-cat="' + cat + '"><b>' + info.name + '</b><span class="muted">' + info.blurb + '</span>' + (pr ? '<span class="tiny ' + (pr.learned ? 'cyan' : 'muted') + '">learned ' + pr.learned + ' / ' + pr.total + (pr.extra ? ' (+' + pr.extra + ' designations)' : '') + '</span><span class="tiny ' + (pr.due ? 'gold' : 'muted') + '">' + pr.started + ' in progress · ' + pr.due + ' due for review</span>' : '<span class="tiny muted">all three kinds</span>') + '</button>';
       }
       body.innerHTML = h + '</div>';
       return;
@@ -567,8 +658,9 @@
     if (shown) {
       const res = shown.res;
       h += '<div class="qfeed ' + (res.correct ? 'ok' : 'no') + '"><b>' + (res.correct ? '✓ Correct' : '✗ Not quite: the answer is ' + esc(Q.options[Q.answer].text)) + '</b>';
-      if (res.correct) h += ' <span class="gold">+' + fmt(res.reward.starlight) + ' ✦</span> <span class="cyan">+' + fmt(res.reward.insight) + ' ◉</span> <span class="muted tiny">' + (res.reward.item >= 2 ? 'first time ×' + res.reward.item : 'repeat ×' + res.reward.item) + (res.reward.streak > 1 ? ' · streak ×' + res.reward.streak.toFixed(1) : '') + '</span>';
+      if (res.correct) h += ' <span class="gold">+' + fmt(res.reward.starlight) + ' ✦</span> <span class="cyan">+' + fmt(res.reward.insight) + ' ◉</span> <span class="muted tiny">' + (res.reward.item >= 2 ? 'first time ×' + res.reward.item : res.reward.item < 0.5 ? 'too soon to count' : 'review ×' + res.reward.item.toFixed(2)) + (res.reward.streak > 1 ? ' · streak ×' + res.reward.streak.toFixed(1) : '') + '</span>';
       h += '<div class="tiny" style="margin-top:4px">' + esc(Q.explain) + '</div>';
+      h += '<div class="tiny srs">' + (res.learnedNow ? '<b class="cyan">\u2605 Learned!</b> All ' + res.learnedBox + ' reviews done. ' : res.correct ? (res.counted ? 'Review counted: <b>' + res.box + ' / ' + res.learnedBox + '</b>. Next counting review in ' + dur(res.nextReviewMs / 1000) + '.' : 'Answered too soon to count (still ' + res.box + ' / ' + res.learnedBox + '). A counting review is due in ' + dur(res.nextReviewMs / 1000) + '.') : 'Back to <b>' + res.box + ' / ' + res.learnedBox + '</b>; it will come back soon.') + '</div>';
       h += '<div class="row" style="margin-top:8px"><button class="btn primary" data-act="school-next">' + (res.last ? 'See results' : 'Next question') + '</button></div></div>';
     }
     body.innerHTML = h;
@@ -626,14 +718,18 @@
         '<li><b>Develop</b> stars with Radiance (more Starlight), Beacon (faster fleets, stronger routes, more fleet slots) and Observatory (Insight ◉).</li>' +
         '<li><b>Trade routes</b>: neighbouring claimed stars boost each other, more when their colours differ.</li>' +
         '<li><b class="cyan">Messier objects</b> need a claimed star nearby and Insight. Each gives a bonus by type (globulars: fleet slots, open clusters: Starlight, nebulae: Insight, galaxies: speed).</li>' +
+        '<li><b>Hubs</b>: select a star with 3+ upgrade levels and build a hub. <b>Collection Hubs</b> bank 50/70/90% of the output of every connected star within 2/3/4 hops automatically (so those stars never wait in a stockpile), <b>Shipyard Hubs</b> add fleet slots, <b>Research Hubs</b> boost Insight, <b>Trade Hubs</b> strengthen routes. Cut routes break a hub\u2019s reach until repaired.</li>' +
+        '<li><b>Routes</b>: upgrade any route between two claimed stars (3 levels) for a stronger trade bonus and faster fleets, or build brand-new lanes (dotted green lines when a star is selected) to link stars the constellation figures don\u2019t.</li>' +
         '<li><b>Developed constellation</b>: every star claimed and at least ' + G.DEV_LEVELS + ' upgrade levels each. It is stamped in the Codex and unlocks one-tap collection there. <b>Mastered</b> at ' + G.MASTER_LEVELS + '.</li></ul>' +
-        '<h3>Sky School</h3><p>Open <b>Sky School</b> for five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, and identify Messier objects by picture and type. Correct answers pay Starlight and Insight (first discoveries pay the most), and things you get right twice are marked <b>learned</b>. The Messier pictures are illustrations of each object type, not photographs.</p>' +
+        '<h3>Sky School</h3><p>Open <b>Sky School</b> for five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, and identify Messier objects by picture and type. Correct answers pay Starlight and Insight (first discoveries pay the most), and everything runs on spaced repetition: an item needs 10 correct answers, spaced further and further apart, before it is marked <b>learned</b>. The Messier pictures are illustrations of each object type, not photographs.</p>' +
+        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a long <b>story</b> chain (expansion, hubs, routes, Messier, Sky School, landmark star groups). Rewards are worth minutes of your income. A badge on the Quests button shows how many are ready to claim.</p>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
         '<h3>Petitions</h3><p>Stars sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. They are never penalties. Nothing in this game dims, decays or is taken from you.</p></div>';
     },
     about(body) {
       body.innerHTML = '<div class="how" style="max-width:720px"><h3 style="margin-top:0">Firmament</h3><p>An incremental empire game on the real night sky. All positions, brightnesses and colours are real; travel times and economics are invented.</p>' +
         '<p>Star positions, names and constellation figures come from the open <a class="link" href="https://github.com/ofrohn/d3-celestial" target="_blank" rel="noopener">d3-celestial</a> data set (derived from the Hipparcos catalogue, IAU star names and Stellarium constellation lines). Messier data likewise. See THIRD_PARTY.md in the repository.</p>' +
+        '<p>Messier photographs come from the open-source <a class="link" href="https://www.npmjs.com/package/messier-api" target="_blank" rel="noopener">messier-api</a> package (MIT), resized for this game. That package does not record the individual photographers, so the original credits are not shown here; if a photo is yours and you would like it credited or removed, please open an issue on the repository. If a photo fails to load, a procedural illustration of the object type is drawn instead.</p>' +
         '<p>' + SKY.stars.length + ' stars · ' + SKY.edges.length + ' routes · 88 constellations · 110 Messier objects.</p></div>';
     },
   };
@@ -642,7 +738,12 @@
   const ACT = {
     'continue': () => { const s = readKey(AUTOSAVE); if (s) beginSession(s, false); },
     'newgame': el => { G.newGame(+el.dataset.i); beginSession(G.state, true); },
-    'open-codex': () => openCodex(), 'open-menu': () => openMenu(), 'open-fleets': () => openFleets(), 'open-school': () => openSchool(),
+    'open-codex': () => openCodex(), 'open-menu': () => openMenu(), 'open-fleets': () => openFleets(), 'open-school': () => openSchool(), 'open-quests': () => openQuests(),
+    'build-hub': el => { const r = G.buildHub(+el.dataset.i, el.dataset.type); toast(r.msg, r.ok ? 'good' : 'bad'); },
+    'upgrade-route': el => { const r = G.upgradeRoute(+el.dataset.e); toast(r.msg, r.ok ? 'good' : 'bad'); },
+    'build-lane': el => { const r = G.buildLane(+el.dataset.e); toast(r.msg, r.ok ? 'good' : 'bad'); },
+    'quest-claim': el => { const r = QU.claim(el.dataset.id); toast(r.ok ? 'Quest reward: +' + fmt(r.reward.starlight) + ' \u2726  +' + fmt(r.reward.insight) + ' \u25c9' : r.msg, r.ok ? 'gold' : 'bad'); },
+    'quest-reroll': el => { QU.rerollContract(el.dataset.id); },
     'school-start': el => { ui.school = { view: 'q', round: QZ.startRound(el.dataset.cat), shown: null, learned: [] }; },
     'school-answer': el => schoolAnswer(+el.dataset.i),
     'school-next': () => { const sc = ui.school; sc.shown = null; if (sc.round.done) sc.view = 'summary'; },

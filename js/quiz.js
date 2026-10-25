@@ -7,9 +7,13 @@
   'use strict';
 
   const ROUND_LENGTH = 5;
-  const LEARNED_AT = 2;                 // correct answers before an item counts as learned
-  const REPEAT_COOLDOWN_MS = 6 * 3600 * 1000;
-  const REWARD = { seconds: 150, firstTime: 2.5, repeat: 0.5, tooSoon: 0.1, streakStep: 0.1, streakMax: 0.5, perfectBonus: 0.5 };
+  // Spaced repetition: an item is "learned" after LEARN_BOX correct answers, but an answer only counts toward that
+  // once the review interval for the item's current box has passed. Early answers still pay a trickle but do not
+  // advance the box; a wrong answer drops the item two boxes.
+  const LEARN_BOX = 10;
+  const MIN = 60e3, HOUR = 3600e3, DAY = 86400e3;
+  const INTERVALS = [0, 10 * MIN, 30 * MIN, 2 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY, 4 * DAY, 7 * DAY, 14 * DAY]; // wait before the next counting review, by box reached
+  const REWARD = { seconds: 150, firstTime: 2.5, reviewPerBox: 0.06, reviewMax: 1.6, tooSoon: 0.1, streakStep: 0.1, streakMax: 0.5, perfectBonus: 0.5 };
 
   const CATS = {
     const: { name: 'Constellations', blurb: 'Recognise figures, borders and myths.' },
@@ -43,14 +47,20 @@
       return out;
     }
     const rec = (cat, id) => Q()[cat][id];
-    const okCount = (cat, id) => (rec(cat, id) || { ok: 0 }).ok;
     const label = i => SKY.stars[i][6];
     const isNamed = i => !!SKY.stars[i][7];
 
     // ---- what to ask about: unfamiliar items and the things you own come up more often
-    const wConst = c => (G.consStatus(c).claimed ? 3 : 1) / (1 + okCount('const', c));
-    const wStar = i => (isNamed(i) ? 3 : G.state.stars[i] ? 1.5 : 0.0001) / (1 + okCount('star', i));
-    const wMessier = m => (G.state.messier[m] ? 3 : 1) / (1 + okCount('messier', m));
+    // unseen items and items due for review come up most; ones not yet due (or already learned) rarely do
+    function priority(cat, id) {
+      const r = rec(cat, id);
+      if (!r) return 2;
+      if (r.learned) return now() >= (r.due || 0) ? 0.4 : 0.04;
+      return now() >= (r.due || 0) ? 3 : 0.12;
+    }
+    const wConst = c => (G.consStatus(c).claimed ? 3 : 1) * priority('const', c);
+    const wStar = i => (isNamed(i) ? 3 : G.state.stars[i] ? 1.5 : 0.0001) * priority('star', i);
+    const wMessier = m => (G.state.messier[m] ? 3 : 1) * priority('messier', m);
     const allConst = [...Array(NC).keys()], allMessier = [...Array(NM).keys()];
     const starPool = () => SKY.stars.map((s, i) => i).filter(i => isNamed(i) || G.state.stars[i]);
 
@@ -224,8 +234,9 @@
     }
     function itemMultiplier(subject) {
       const r = rec(subject.cat, subject.id);
-      if (!r || r.ok === 0) return REWARD.firstTime;
-      return now() - r.last >= REPEAT_COOLDOWN_MS ? REWARD.repeat : REWARD.tooSoon;
+      if (!r || r.ok === 0) return { mult: REWARD.firstTime, counts: true, first: true };
+      if (now() >= (r.due || 0)) return { mult: Math.min(REWARD.reviewMax, 1 + REWARD.reviewPerBox * (r.box || 0)), counts: true, first: false };
+      return { mult: REWARD.tooSoon, counts: false, first: false };
     }
     function answer(round, choice) {
       if (round.done) return null;
@@ -234,21 +245,30 @@
       const st = Q().stats;
       st.answered++;
       const store = Q()[q.subject.cat];
-      const r = store[q.subject.id] || (store[q.subject.id] = { ok: 0, bad: 0, last: 0 });
+      const r = store[q.subject.id] || (store[q.subject.id] = { ok: 0, bad: 0, last: 0, box: 0, due: 0, learned: 0 });
+      if (r.box === undefined) { r.box = 0; r.due = 0; r.learned = 0; } // records from before spaced repetition
       let reward = { starlight: 0, insight: 0, item: 0, streak: 0 };
+      let counted = false, learnedNow = false;
       if (correct) {
-        const base = rewardBase();
-        const item = itemMultiplier(q.subject), streak = 1 + Math.min(REWARD.streakMax, REWARD.streakStep * round.streak);
-        reward = { starlight: base.starlight * item * streak, insight: base.insight * item * streak, item, streak };
+        const im = itemMultiplier(q.subject);
+        const base = rewardBase(), streak = 1 + Math.min(REWARD.streakMax, REWARD.streakStep * round.streak);
+        reward = { starlight: base.starlight * im.mult * streak, insight: base.insight * im.mult * streak, item: im.mult, streak, first: im.first };
         r.ok++; r.last = now(); st.correct++;
+        if (im.counts) {
+          counted = true; r.box = Math.min(LEARN_BOX, r.box + 1);
+          r.due = now() + INTERVALS[r.box];
+          if (r.box >= LEARN_BOX && !r.learned) { r.learned = now(); learnedNow = true; }
+        }
         round.streak++; round.best = Math.max(round.best, round.streak); st.bestStreak = Math.max(st.bestStreak, round.streak);
         round.correct++;
         round.earned.starlight += reward.starlight; round.earned.insight += reward.insight;
         G.grant(reward.starlight, reward.insight);
-      } else { r.bad++; round.streak = 0; }
-      const learnedNow = correct && r.ok === LEARNED_AT;
+      } else {
+        r.bad++; round.streak = 0;
+        r.box = Math.max(0, r.box - 2); r.due = now() + INTERVALS[r.box]; // come back to it soon
+      }
       round.answers.push({ choice, correct });
-      const res = { correct, answer: q.answer, explain: q.explain, reward, learnedNow, last: round.i === round.qs.length - 1 };
+      const res = { correct, answer: q.answer, explain: q.explain, reward, counted, learnedNow, box: r.box, learnedBox: LEARN_BOX, nextReviewMs: Math.max(0, r.due - now()), last: round.i === round.qs.length - 1 };
       round.i++;
       if (res.last) {
         round.done = true; st.rounds++;
@@ -261,14 +281,18 @@
     }
 
     // ---- progress
-    function learned(cat, id) { const r = Q()[cat][id]; return !!r && r.ok >= LEARNED_AT; }
+    function learned(cat, id) { const r = Q()[cat][id]; return !!r && !!r.learned; }
+    function boxOf(cat, id) { const r = Q()[cat][id]; return r ? (r.box || 0) : 0; }
+    function isDue(cat, id) { const r = Q()[cat][id]; return !!r && !r.learned && now() >= (r.due || 0); }
     function progress(cat) {
       const store = Q()[cat];
-      if (cat === 'const') return { learned: allConst.filter(i => learned('const', i)).length, total: NC };
-      if (cat === 'messier') return { learned: allMessier.filter(i => learned('messier', i)).length, total: NM };
-      return { learned: named.filter(i => learned('star', i)).length, total: named.length, extra: Object.keys(store).filter(k => !isNamed(+k) && learned('star', +k)).length };
+      const ids = cat === 'const' ? allConst : cat === 'messier' ? allMessier : named;
+      const out = { learned: ids.filter(i => learned(cat, i)).length, total: ids.length, started: ids.filter(i => store[i]).length, due: ids.filter(i => isDue(cat, i)).length };
+      if (cat === 'star') { out.extra = Object.keys(store).filter(k => !isNamed(+k) && learned('star', +k)).length; out.due += Object.keys(store).filter(k => !isNamed(+k) && isDue('star', +k)).length; }
+      return out;
     }
-    return { ROUND_LENGTH, LEARNED_AT, REWARD, CATS, KINDS, question, startRound, answer, learned, progress, rewardBase, typeNames, named };
+    function learnedTotal() { return ['const', 'star', 'messier'].reduce((n, c) => n + Object.values(Q()[c]).filter(r => r.learned).length, 0); }
+    return { ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS, KINDS, question, startRound, answer, learned, boxOf, isDue, progress, learnedTotal, rewardBase, typeNames, named };
   }
-  return { create, ROUND_LENGTH, LEARNED_AT, REWARD, CATS };
+  return { create, ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS };
 });
