@@ -142,8 +142,8 @@
     // ---- Technology
     [[1, 8], [4, 20], [8, 40], [12, 80], [15, 150], [18, 250]].forEach(([n, m]) => add('tech' + n, 'Technology', n === 1 ? 'First breakthrough' : S_(n, 'breakthrough', 'breakthroughs'), n === 1 ? 'Complete your first research project (Corporation → Technology).' : 'Complete ' + n + ' research projects.', () => G.techCount() - 1, n, m));
     add('tech21', 'Technology', 'Every technology', 'Complete every research project, from the telescope to the warp drive.', () => G.techCount() - 1, G.TECHS.length - 1, 500);
-    add('treasury', 'Technology', 'The Treasury chain', 'Research the Telegraph, Electronic Funds Transfer and Digital Payments: ordinary colonies then bank up to 80% of their cash on their own.', () => techDone('telegraph') + techDone('eft') + techDone('payments'), 3, 60);
-    ['telegraph', 'radio', 'rocketry', 'computing', 'orbit', 'moon', 'space_telescope', 'internet', 'asteroid', 'ai', 'fusion', 'antimatter', 'warp'].forEach(id => { const t = G.TECH_BY_ID[id]; add('t_' + id, 'Technology', t.name, t.blurb + ' (Corporation → Technology)', () => techDone(id), 1, Math.round(6 + 20 * t.cashMul)); });
+    add('treasury', 'Technology', 'The Treasury chain', 'Research Double-Entry Bookkeeping, the Telegraph, Electronic Funds Transfer and Digital Payments: ordinary colonies then bank up to 80% of their cash on their own.', () => techDone('ledgers') + techDone('telegraph') + techDone('eft') + techDone('payments'), 4, 60);
+    ['ledgers', 'atlas', 'telegraph', 'radio', 'rocketry', 'computing', 'orbit', 'moon', 'space_telescope', 'internet', 'asteroid', 'ai', 'fusion', 'antimatter', 'warp'].forEach(id => { const t = G.TECH_BY_ID[id]; add('t_' + id, 'Technology', t.name, t.blurb + ' (Corporation → Technology)', () => techDone(id), 1, Math.round(6 + 20 * t.cashMul)); });
     // ---- Buildings
     add('bld1', 'Buildings', 'Break ground', 'Build your first building. Every three development levels on a colony open a building slot.', builtAll, 1, 12);
     add('bldclear', 'Buildings', 'Hands-free revenue', 'Build a Clearing House: it banks the revenue of a whole region automatically.', () => builtOf('clearing'), 1, 20);
@@ -184,6 +184,8 @@
     [[1, 4], [5, 20], [25, 80], [100, 250]].forEach(([n, m]) => add('pet' + n, 'Petitions', n === 1 ? 'The customer is always right' : 'Answer ' + n + ' petitions', 'Grant ' + S_(n, 'colony petition', 'colony petitions') + ' (an upgrade, an expansion or a collection).', () => st().petitionsDone, n, m));
     // ---- Sky School
     [[20, 4], [100, 20], [400, 80], [1000, 200], [3000, 500]].forEach(([n, m]) => add('quiz' + n, 'Sky School', 'Answer ' + n + ' questions correctly', 'Play Sky School rounds.', () => qz().stats.correct, n, m));
+    [[50, 8], [250, 30], [1000, 100], [2500, 300], [5000, 600]].forEach(([n, m]) => add('chart' + n, 'Sky School', 'Earn ' + n + ' charts', 'Earn ' + n + ' charts from correct answers: the currency colony ships need.', () => G.state.stats.chartsEarned, n, m));
+    [[100, 20], [1000, 150], [2500, 450]].forEach(([n, m]) => add('chartspent' + n, 'Sky School', 'Spend ' + n + ' charts', 'Spend ' + n + ' charts on colony ships and takeover fleets.', () => G.state.stats.chartsSpent, n, m));
     add('learn1', 'Sky School', 'Something learned', 'Get one item through all 10 spaced reviews and mark it learned.', learnedAll, 1, 40);
     add('learn5', 'Sky School', 'Five things learned', 'Learn any five constellations, stars or Messier objects.', learnedAll, 5, 120);
     add('learn25', 'Sky School', 'A well-read sky', 'Learn 25 things for good.', learnedAll, 25, 500);

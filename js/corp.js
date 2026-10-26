@@ -44,7 +44,7 @@
       text: L => '+' + pct(0.25 * L) + ' revenue at this colony',
     },
     clearing: {
-      name: 'Clearing House', short: 'CH', cat: 'regional', regional: true, tech: 'computing', costMul: 5, rp: 30,
+      name: 'Clearing House', short: 'CH', cat: 'regional', regional: true, tech: 'ledgers', costMul: 5, rp: 30,
       blurb: 'Automated settlement: revenue banks itself instead of waiting to be collected. Flagship stars always keep their own books.',
       text: L => 'Auto-banks ' + pct([0, 0.5, 0.7, 0.9][L]) + ' of revenue and research, ' + (L + 1) + ' hops',
     },
@@ -110,8 +110,10 @@
   // id, name, year, era, requires, perks, blurb. A tech's cost comes from its era (see ERAS) and a per-tech weight.
   const TECH_DEFS = [
     ['telescope', 'Refracting Telescope', '1608', 0, [], {}, 'Galileo points a spyglass at the sky and sees moons around Jupiter.', 0],
+    ['ledgers', 'Double-Entry Bookkeeping', '1494', 0, [], { auto: 0.35 }, 'Pacioli’s method lets clerks settle accounts without the owner: 35% of ordinary colonies’ cash banks itself, and the first Clearing Houses open.', 0.5],
+    ['atlas', 'Star Atlas', '1603', 0, [], { chart: 0.2 }, 'Bayer’s Uranometria charts every naked-eye star: every correct answer in Sky School pays 20% more charts.', 1],
     ['stocks', 'Joint-Stock Company', '1602', 0, [], { out: 0.02 }, 'Shared ownership lets companies fund ventures too big for any one backer.', 1],
-    ['telegraph', 'Telegraph', '1844', 1, [], { auto: 0.3 }, 'Money travels as fast as news: ordinary colonies bank 30% of their cash automatically.', 1],
+    ['telegraph', 'Telegraph', '1844', 1, ['ledgers'], { auto: 0.25 }, 'Money travels as fast as news: a further 25% of ordinary colonies’ cash banks itself.', 0.6],
     ['electricity', 'Electric Power', '1882', 1, [], { out: 0.05 }, 'Power stations and grids light the first modern cities.', 1],
     ['radio', 'Radio', '1895', 1, ['electricity'], { res: 0.05 }, 'Signals through the air, and later from the stars.', 1],
     ['rocketry', 'Liquid-Fuel Rocket', '1926', 2, ['electricity'], {}, 'Goddard launches the first liquid-fuelled rocket.', 1],
@@ -119,12 +121,12 @@
     ['photovoltaics', 'Solar Cell', '1954', 2, ['electricity'], {}, 'Bell Labs turn sunlight directly into electricity.', 1],
     ['orbit', 'Orbital Flight', '1957', 2, ['rocketry'], {}, 'Sputnik 1 beeps from orbit and the space age begins.', 1.2],
     ['satellites', 'Communications Satellite', '1962', 2, ['orbit', 'radio'], { out: 0.04 }, 'Telstar relays live television across the Atlantic.', 1.2],
-    ['eft', 'Electronic Funds Transfer', '1973', 2, ['computing', 'telegraph'], { auto: 0.25 }, 'SWIFT and automated clearing move money between banks overnight: a further 25% is banked automatically.', 1.2],
+    ['eft', 'Electronic Funds Transfer', '1973', 2, ['computing', 'telegraph'], { auto: 0.12 }, 'SWIFT and automated clearing move money between banks overnight: a further 12% is banked automatically.', 1.2],
     ['moon', 'Crewed Moon Landing', '1969', 2, ['orbit'], { speed: 0.05 }, 'Apollo 11 puts people on another world.', 1.4],
     ['station', 'Space Station', '1971', 2, ['orbit'], {}, 'Salyut 1 is the first crewed orbital outpost.', 1.4],
-    ['space_telescope', 'Space Telescope', '1990', 3, ['station'], { res: 0.1 }, 'Hubble looks at the universe from above the atmosphere.', 1],
-    ['internet', 'The Internet', '1991', 3, ['computing', 'satellites'], {}, 'A global network connects every lab and boardroom.', 1],
-    ['payments', 'Digital Payments', '2000s', 3, ['internet', 'eft'], { auto: 0.25 }, 'Payments settle in seconds, anywhere: 80% of ordinary revenue now banks itself.', 1],
+    ['space_telescope', 'Space Telescope', '1990', 3, ['station'], { res: 0.1, chart: 0.2 }, 'Hubble looks at the universe from above the atmosphere, and Hipparcos and Gaia map the stars: 20% more charts from every answer.', 1],
+    ['internet', 'The Internet', '1991', 3, ['computing', 'satellites'], { chart: 0.2 }, 'A global network connects every lab and boardroom, and the sky surveys go online: 20% more charts from every answer.', 1],
+    ['payments', 'Digital Payments', '2000s', 3, ['internet', 'eft'], { auto: 0.08 }, 'Payments settle in seconds, anywhere: 80% of ordinary revenue now banks itself.', 1],
     ['reusable', 'Reusable Rockets', '2015', 3, ['orbit'], { cost: 0.05 }, 'Boosters land themselves and fly again, and launches get cheap.', 1.2],
     ['asteroid', 'Asteroid Mining', '2020s', 3, ['reusable'], {}, 'Probes sample asteroids; prospectors eye their metals.', 1.3],
     ['ai', 'Machine Learning', '2010s', 3, ['internet'], { res: 0.15, out: 0.05 }, 'Software that learns from data speeds up every kind of research.', 1.3],
@@ -142,7 +144,7 @@
   const TECH_BY_ID = {}; TECHS.forEach(t => { TECH_BY_ID[t.id] = t; });
   const PERK_TEXT = {
     out: v => '+' + pct(v) + ' revenue', res: v => '+' + pct(v) + ' research', speed: v => '−' + pct(v) + ' ship travel time', cost: v => '−' + pct(v) + ' costs',
-    auto: v => '+' + pct(v) + ' of ordinary colonies’ cash banked automatically', cap: v => '+' + pct(v) + ' storage', ev: v => '+' + pct(v) + ' comet and nova rewards',
+    auto: v => '+' + pct(v) + ' of ordinary colonies’ cash banked automatically', chart: v => '+' + pct(v) + ' charts from every correct answer', cap: v => '+' + pct(v) + ' storage', ev: v => '+' + pct(v) + ' comet and nova rewards',
     route: v => '+' + pct(v) + ' trade-route strength', star: v => '+' + pct(v) + ' star bonuses', slots: v => '+' + (Math.round(v * 100) / 100) + ' fleet slot' + (v === 1 ? '' : 's'),
   };
 

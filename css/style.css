@@ -17,6 +17,7 @@ button { font: inherit; color: inherit; }
 .btn.primary { background: linear-gradient(#3b5fb8, #2b4690); border-color: #6c8ee0; }
 .btn.primary:hover:not(:disabled) { background: linear-gradient(#4a72d4, #35549f); }
 .btn.gold { background: linear-gradient(#8a6a22, #6b5018); border-color: #d9b45a; color: #fff3d0; }
+.btn.violet { background: linear-gradient(#5b3f8a, #432e6b); border-color: #b08ae8; color: #efe3ff; }
 .btn.ghost { background: transparent; border-color: transparent; }
 .btn.small { padding: 3px 9px; font-size: 12px; border-radius: 7px; }
 .btn.bad { border-color: rgba(255, 138, 138, .45); }
@@ -27,7 +28,7 @@ button { font: inherit; color: inherit; }
 .res { display: flex; align-items: baseline; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 5px 10px; white-space: nowrap; }
 .res b { font-size: 16px; font-variant-numeric: tabular-nums; }
 .res small { color: var(--dim); font-size: 11px; }
-.ico.gold { color: var(--gold); } .ico.cyan { color: var(--cyan); }
+.ico.gold { color: var(--gold); } .ico.cyan { color: var(--cyan); } .ico.violet { color: #c9a0ff; }
 
 #banner { position: fixed; top: var(--hud-h, 58px); left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 20px)); z-index: 6; background: var(--panel); border: 1px solid rgba(255, 190, 120, .55); border-radius: 12px; padding: 9px 12px; box-shadow: 0 6px 30px rgba(0, 0, 0, .5); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 #banner.redraw { border-color: rgba(127, 227, 255, .6); }
@@ -75,7 +76,7 @@ button { font: inherit; color: inherit; }
 .pips { display: inline-flex; gap: 3px; }
 .pips i { width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, .1); display: block; }
 .pips i.on { background: var(--gold); box-shadow: 0 0 6px rgba(255, 217, 138, .6); }
-.muted { color: var(--dim); } .gold { color: var(--gold); } .cyan { color: var(--cyan); } .good { color: var(--good); } .bad { color: var(--bad); }
+.muted { color: var(--dim); } .gold { color: var(--gold); } .cyan { color: var(--cyan); } .violet { color: #c9a0ff; } .good { color: var(--good); } .bad { color: var(--bad); }
 .link { color: var(--accent); cursor: pointer; text-decoration: none; } .link:hover { text-decoration: underline; }
 .tiny { font-size: 12px; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: baseline; }

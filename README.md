@@ -26,6 +26,18 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   multiplier: **ordinary stars ×0.45** (cheap, so the opening is quick), bright (mag 2 to 3) ×0.9, brilliant
   (mag 1 to 2) ×1.5, each constellation's **lead star** (its alpha, or its brightest) ×3, and the 20 **flagships**
   ×6. Pressing Space buys the best revenue for the money, so the dear stars are deliberate purchases.
+- **Charts ✧: the second currency, earned by answering questions.** A star has to be charted before it can be settled,
+  so every colony ship and takeover fleet costs **charts as well as cash**, and **every correct Sky School answer
+  pays them** (Constellations, Stars, Messier and the Olympiad Academy alike; quizzes no longer pay cash or
+  research). A counting review pays 1 chart, the first time you get an item right pays 2, a streak (from the third
+  correct answer in a round) pays +1 each and a perfect round +2, and an answer given too soon after the last one pays
+  nothing, so the spaced repetition cannot be farmed. A star's chart cost is its importance (the same multiplier as
+  its price: an ordinary star is 1 chart, a lead star about 3, a flagship about 6) times 1 + colonies ÷ 400, a rival's
+  star costs twice that (at least 2), and taking back a colony a rival occupied costs none. You start with 12, and the
+  **Star Atlas**, the **Space Telescope** and **the Internet** each make every answer pay 20% more. Charts are shown in
+  the top bar (✧), in the star panel next to the cash price, and a chip tells you when charts are all that stands between
+  you and your next colony. Studying a little every day keeps pace with the economy; never studying leaves you at
+  about a dozen colonies. Older saves are credited one chart for every answer they have already given.
 - **Rival companies.** Three rivals start on far-apart flagships and expand at **about your own pace**: every star
   you add earns each of them a share of one (90%, 75% and 60%), they favour lead stars and flagships, they only
   grow while you do. The map tints each empire's ground and
@@ -56,13 +68,15 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   flagship you own; the flagship's vault holds 24 hours, **never banks itself**, and collecting there pays a 20%
   dividend premium. Whatever else you automate, the important stars still need a visit, at every stage of the
   game: the Corporation panel shows what share of your income waits for one.
-- **Auto-collection**: research the **Telegraph** (30%), **Electronic Funds Transfer** (+25%) and **Digital
-  Payments** (+25%) and ordinary colonies bank up to 80% of what they keep automatically, with a Clearing House
-  on top. Flagships are excluded, and so is one-tap constellation collection of their vaults.
+- **Auto-collection comes early.** You start with enough research for **Double-Entry Bookkeeping** (1494: about
+  $6, 5 minutes), which banks **35%** of what ordinary colonies make from then on and unlocks the Clearing House. The
+  **Telegraph** (+25%, a half-hour project), **Electronic Funds Transfer** (+12%) and **Digital Payments** (+8%) take it
+  to 80%, with a Clearing House on top. Flagships are excluded, and so is one-tap constellation collection of their
+  vaults.
 - **Trade routes** between neighbouring colonies boost both ends, more when their star colours differ.
-- **Technology**: a 22-project tree of real human technology, from the refracting telescope (1608) through
+- **Technology**: a 26-project tree of real human technology, from the refracting telescope (1608) through
   electric power, rockets, computers, solar cells, space stations, the internet, reusable rockets, fusion and
-  space elevators to Dyson swarms and the warp drive. One project at a time, in real time (10 minutes for the
+  space elevators to Dyson swarms and the warp drive. One project at a time, in real time (5 minutes for the
   first, up to 3 days for the last, about two weeks for the whole tree), and it keeps running while you are
   away. Each costs cash and research points, unlocks buildings and most give a company-wide bonus.
 - **Buildings**: every three development levels open one building slot at a colony (the rings around the star;
@@ -96,7 +110,7 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
 - **Developed constellations**: colonise every star and develop each to ≥3 levels. It is stamped in the Codex
   (with a page per constellation: chart, lore, stars, neighbours, your own notes) and unlocks one-tap
   collection. **Mastered** at ≥9 levels each.
-- **Quests**: three repeatable *contracts* plus a story of nearly 400 goals in seventeen chapters (Expansion,
+- **Quests**: three repeatable *contracts* plus a story of more than 400 goals in seventeen chapters (Expansion,
   Revenue, Corporation, Rivals, Development, Technology, Buildings, Routes, Flagships, Spectra, Messier, Landmarks,
   Skies, Calendar, Petitions, Sky School and the Olympiad Academy). The list offers the next goal of every chapter; tap a chapter
   to see everything left in it. A goal once reached stays reached, even if a rival later captures the colonies behind it. Chapters reach from "colonise 2 stars" to "Earn $100B", "all 757 stars", every
@@ -105,16 +119,15 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   Hexagon, the four Royal Stars...), developing named constellations and the whole Zodiac, and every Academy
   topic at level 3. Progress counts lifetime totals or high-water marks, so a finished goal never un-finishes.
   Rewards are worth minutes of your revenue, so they keep pace as you grow.
-- **Sky School** (gold button): five-question minigames that pay a little cash and research. *Constellations*:
+- **Sky School** (gold button): five-question minigames that pay **charts**. *Constellations*:
   name a figure, pick the figure for a name, match a myth to a constellation, find a neighbour. *Stars*:
   which star is circled, what colour is it, which is brighter, which constellation is it in. *Messier*:
   what kind of object is this picture, **which Messier number or common name is this photo**, which photo is
   M13 or the Orion Nebula (the wrong answers look more and more alike as you learn an object), which
-  constellation holds M42, which number is the Crab Nebula. Rewards are deliberately modest (about 40 seconds
-  of your revenue per correct answer, ×2 the first time you get something right, plus small streak and
-  perfect-round bonuses). It runs on **spaced repetition**: an item is only *learned* after **10 correct
+  constellation holds M42, which number is the Crab Nebula. Charts: 1 per counting review, ×2 the first time you
+  get something right, plus streak and perfect-round bonuses. It runs on **spaced repetition**: an item is only *learned* after **10 correct
   answers**, and each one only counts once its review interval has passed (10 min → 30 min → 2 h → 6 h →
-  12 h → 1 d → 2 d → 4 d → 7 d → 14 d); answering early pays a trickle but does not advance it, and a wrong
+  12 h → 1 d → 2 d → 4 d → 7 d → 14 d); answering early pays no charts and does not advance it, and a wrong
   answer sends the item back two steps. Items that are due come up most often.
 - **Learning** (Codex → Learning): per-category progress bars, every item you have practised with ten pips,
   its next review time and right/wrong counts, filters for due / waiting / learned, and a *Review due items*

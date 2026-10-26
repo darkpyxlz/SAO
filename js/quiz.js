@@ -1,5 +1,5 @@
 /* Sky School: quiz logic (no DOM). Builds questions about constellations, stars, Messier objects and the Olympiad Academy's
-   astronomy syllabus, scores answers, pays rewards and tracks what the player has learned. */
+   astronomy syllabus, scores answers, pays charts (the currency colony ships need) and tracks what the player has learned. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory(require('./astro.js'));
   else root.Quiz = factory(root.Astro);
@@ -8,13 +8,15 @@
 
   const ROUND_LENGTH = 5;
   // Spaced repetition: an item is "learned" after LEARN_BOX correct answers, but an answer only counts toward that
-  // once the review interval for the item's current box has passed. Early answers still pay a trickle but do not
+  // once the review interval for the item's current box has passed. Early answers pay no charts and do not
   // advance the box; a wrong answer drops the item two boxes.
   const LEARN_BOX = 10;
   const MIN = 60e3, HOUR = 3600e3, DAY = 86400e3;
   const INTERVALS = [0, 10 * MIN, 30 * MIN, 2 * HOUR, 6 * HOUR, 12 * HOUR, DAY, 2 * DAY, 4 * DAY, 7 * DAY, 14 * DAY]; // wait before the next counting review, by box reached
-  // Rewards are deliberately modest: about 40 seconds of company revenue per correct answer.
-  const REWARD = { seconds: 40, firstTime: 2, reviewPerBox: 0.03, reviewMax: 1.3, tooSoon: 0.05, streakStep: 0.05, streakMax: 0.25, perfectBonus: 0.25 };
+  // Charts: every correct answer pays charts, the currency a colony ship needs before it can sail (the engine's chartCost). A counting review pays one,
+  // the first time you get an item right pays two, an answer given too soon after the last one pays none, and a streak (from the third correct answer in
+  // a round) and a perfect round pay a little extra. Technologies add a percentage to what the answers themselves pay (G.d.P.chart).
+  const CHART = { perAnswer: 1, firstTime: 2, tooSoon: 0, streakFrom: 3, streakBonus: 1, perfectBonus: 2 };
 
   const CATS = {
     const: { name: 'Constellations', blurb: 'Recognise figures, borders and myths.' },
@@ -276,17 +278,15 @@
         seen.add(q.subject.cat + ':' + q.subject.id);
         qs.push(q);
       }
-      return { cat, qs, i: 0, correct: 0, streak: 0, best: 0, earned: { cash: 0, research: 0 }, answers: [], done: false, bonus: null };
+      return { cat, qs, i: 0, correct: 0, streak: 0, best: 0, earned: { charts: 0 }, answers: [], done: false, bonus: null };
     }
-    function rewardBase() {
-      const D = G.d;
-      return { cash: Math.max(15, D.totalRate * REWARD.seconds), research: Math.max(1, D.totalRes * REWARD.seconds) };
-    }
+    const chartK = () => 1 + ((G.d && G.d.P && G.d.P.chart) || 0); // what technologies add to every answer
+    function chartYield() { return { perAnswer: CHART.perAnswer * chartK(), first: CHART.firstTime * chartK(), streak: CHART.streakBonus, perfect: CHART.perfectBonus * chartK() }; }
     function itemMultiplier(subject) {
       const r = rec(subject.cat, subject.id);
-      if (!r || r.ok === 0) return { mult: REWARD.firstTime, counts: true, first: true };
-      if (now() >= (r.due || 0)) return { mult: Math.min(REWARD.reviewMax, 1 + REWARD.reviewPerBox * (r.box || 0)), counts: true, first: false };
-      return { mult: REWARD.tooSoon, counts: false, first: false };
+      if (!r || r.ok === 0) return { mult: CHART.firstTime, counts: true, first: true };
+      if (now() >= (r.due || 0)) return { mult: CHART.perAnswer, counts: true, first: false };
+      return { mult: CHART.tooSoon, counts: false, first: false };
     }
     function answer(round, choice) {
       if (round.done) return null;
@@ -297,12 +297,12 @@
       const store = Q()[q.subject.cat];
       const r = store[q.subject.id] || (store[q.subject.id] = { ok: 0, bad: 0, last: 0, box: 0, due: 0, learned: 0 });
       if (r.box === undefined) { r.box = 0; r.due = 0; r.learned = 0; } // records from before spaced repetition
-      let reward = { cash: 0, research: 0, item: 0, streak: 0 };
+      let reward = { charts: 0, item: 0, streak: 0 };
       let counted = false, learnedNow = false;
       if (correct) {
         const im = itemMultiplier(q.subject);
-        const base = rewardBase(), streak = 1 + Math.min(REWARD.streakMax, REWARD.streakStep * round.streak);
-        reward = { cash: base.cash * im.mult * streak, research: base.research * im.mult * streak, item: im.mult, streak, first: im.first };
+        const streak = im.mult > 0 && round.streak + 1 >= CHART.streakFrom ? CHART.streakBonus : 0; // a streak only pays on answers that pay
+        reward = { charts: im.mult * chartK() + streak, item: im.mult, streak, first: im.first };
         r.ok++; r.last = now(); st.correct++;
         if (im.counts) {
           counted = true; r.box = Math.min(LEARN_BOX, r.box + 1);
@@ -311,8 +311,8 @@
         }
         round.streak++; round.best = Math.max(round.best, round.streak); st.bestStreak = Math.max(st.bestStreak, round.streak);
         round.correct++;
-        round.earned.cash += reward.cash; round.earned.research += reward.research;
-        G.grant(reward.cash, reward.research);
+        round.earned.charts += reward.charts;
+        G.grantCharts(reward.charts);
       } else {
         r.bad++; round.streak = 0;
         r.box = Math.max(0, r.box - 2); r.due = now() + INTERVALS[r.box]; // come back to it soon
@@ -324,8 +324,8 @@
       if (res.last) {
         round.done = true; st.rounds++;
         if (round.correct === round.qs.length) {
-          const b = { cash: round.earned.cash * REWARD.perfectBonus, research: round.earned.research * REWARD.perfectBonus };
-          round.bonus = b; st.perfect++; G.grant(b.cash, b.research);
+          const b = { charts: round.earned.charts > 0 ? CHART.perfectBonus * chartK() : 0 }; // a perfect round of answers that paid nothing pays nothing
+          round.bonus = b; st.perfect++; G.grantCharts(b.charts);
         }
       }
       return res;
@@ -355,7 +355,7 @@
       });
     }
     function learnedTotal() { return ['const', 'star', 'messier', 'astro'].reduce((n, c) => n + Object.values(Q()[c]).filter(r => r.learned).length, 0); }
-    return { ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS, KINDS, build: kind => { const q = BUILD[kind](); if (q && !q.explain) q.explain = explain(q); return q; }, topicCards: id => Astro.IDS_BY_TOPIC[id], question, startRound, answer, learned, boxOf, isDue, progress, items, learnedTotal, rewardBase, typeNames, named };
+    return { ROUND_LENGTH, LEARN_BOX, INTERVALS, CHART, CATS, KINDS, build: kind => { const q = BUILD[kind](); if (q && !q.explain) q.explain = explain(q); return q; }, topicCards: id => Astro.IDS_BY_TOPIC[id], question, startRound, answer, learned, boxOf, isDue, progress, items, learnedTotal, chartYield, typeNames, named };
   }
-  return { create, ROUND_LENGTH, LEARN_BOX, INTERVALS, REWARD, CATS };
+  return { create, ROUND_LENGTH, LEARN_BOX, INTERVALS, CHART, CATS };
 });

@@ -24,7 +24,7 @@
   const MASTER_LEVELS = 9; // ... and for a "mastered" one
 
   const CFG = {
-    startCash: 100, baseOutput: 0.068,
+    startCash: 100, startResearch: 8, baseOutput: 0.068,
     secPerDeg: 6,
     messierTravelMul: 1.5,
     baseSlots: 3,
@@ -64,6 +64,9 @@
     raidMinColonies: 15, raidRatio: 0.012, raidCreditCap: 2, raidGap: 1500, raidMinSecs: 90, raidSecPerDeg: 14,
     defenceBase: 3, defencePerLevel: 2.5, defencePerBuilding: 4, defenceFlagship: 15, strengthBase: 6, strengthPerRoot: 1.6,
     reinforceFrac: 0.8, reinforceBoost: 25, reinforceSecs: 1800, reclaimMul: 0.6,
+    // charts: the currency of knowledge. Correct Sky School answers earn them (see quiz.js) and every colony ship or takeover fleet spends them: a star has to
+    // be charted before it can be settled. A star's chart cost follows its importance (like its price) and the size of the company, and a rival's star costs more.
+    chartStart: 12, chartBase: 1, chartRamp: 400, chartTakeoverMul: 2,
   };
   const RIVAL_COLORS = ['#ff8aa8', '#7fe0a6', '#c9a0ff', '#ffb06a'];
   const ROUTE_MAX = 3;
@@ -72,8 +75,10 @@
     out: v => '+' + pct(v) + ' revenue', speed: v => '−' + pct(v) + ' ship travel time', slots: v => '+' + Math.round(v * 100) / 100 + ' fleet slot' + (v === 1 ? '' : 's'),
     res: v => '+' + pct(v) + ' research', cost: v => '−' + pct(v) + ' costs', cap: v => '+' + pct(v) + ' storage', ev: v => '+' + pct(v) + ' event rewards',
     auto: v => '+' + pct(v) + ' of cash banked automatically', route: v => '+' + pct(v) + ' trade-route strength', star: v => '+' + pct(v) + ' star bonuses',
+    chart: v => '+' + pct(v) + ' charts from answers',
   };
   function pct(v) { return Math.round(v * 1000) / 10 + '%'; }
+  const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many || one + 's');
 
   const MESSIER_PERK = {
     globular: ['slots', 1 / 3], open: ['out', 0.02], nebula: ['res', 0.04], galaxy: ['speed', 0.015], other: ['cost', 0.01],
@@ -139,13 +144,13 @@
     SKY.messier.forEach((m, i) => m.links.forEach(s => messierFrom[s].push(i)));
 
 
-    function blankStats() { return { collected: 0, auto: 0, claimed: 0, launched: 0, upgrades: 0, eventsDone: 0, perfect: 0, restoredRoutes: 0, petitionsDone: 0, collects: 0, routeUps: 0, built: 0, buildUps: 0, techs: 0, demolished: 0, marketEvents: 0, flagCollects: 0, flagCash: 0, takeovers: 0, flagTakeovers: 0, capitals: 0, acquired: 0, starsLost: 0, repelled: 0, reclaimed: 0, reinforced: 0 }; }
+    function blankStats() { return { collected: 0, auto: 0, claimed: 0, launched: 0, upgrades: 0, eventsDone: 0, perfect: 0, restoredRoutes: 0, petitionsDone: 0, collects: 0, routeUps: 0, built: 0, buildUps: 0, techs: 0, demolished: 0, marketEvents: 0, flagCollects: 0, flagCash: 0, takeovers: 0, flagTakeovers: 0, capitals: 0, acquired: 0, starsLost: 0, repelled: 0, reclaimed: 0, reinforced: 0, chartsEarned: 0, chartsSpent: 0 }; }
     function blankQuiz() { return { const: {}, star: {}, messier: {}, astro: {}, stats: { answered: 0, correct: 0, rounds: 0, perfect: 0, bestStreak: 0 } }; }
     function blankMarket() { return { kind: null, remaining: 0, nextIn: rand(CFG.marketFirstDelay), price: 10, hi: 10, hist: [10], priceTimer: 0 }; }
     function blankState(home, corpName) {
       return {
         version: SAVE_VERSION, created: nowFn(), saved: nowFn(), clock: 0, active: 0,
-        cash: CFG.startCash, research: 0, home,
+        cash: CFG.startCash, research: CFG.startResearch, charts: CFG.chartStart, home,
         corp: { name: corpName || Corp.defaultCompanyName(SKY.stars[home][6]), founded: nowFn(), rank: 0 },
         tech: { done: { telescope: nowFn() }, active: null },
         market: blankMarket(),
@@ -224,6 +229,7 @@
       S.tech = S.tech || { done: { telescope: nowFn() }, active: null };
       if (!S.tech.done) S.tech.done = {};
       S.tech.done.telescope = S.tech.done.telescope || nowFn();
+      for (const id of Object.keys(S.tech.done)) { const t = TECH_BY_ID[id]; if (t) techClosure(t.req, S.tech.done, S.tech.done[id]); } // requirements added since the save was made
       S.market = Object.assign(blankMarket(), S.market);
       S.owner = S.owner || {}; S.showers = S.showers || {}; S.comets = S.comets || {}; S.skyKey = S.skyKey || 0;
       S.raids = S.raids || []; S.raidSeq = S.raidSeq || 0; S.guard = S.guard || {}; S.occupied = S.occupied || {};
@@ -233,6 +239,10 @@
       recalc();
       if (!hadRivals) { initRivals(); recalc(); catchUpRivals(); } // an older save: the rivals have been growing at your pace all along
       else for (const r of S.rivals) r.stuck = false;
+      if (S.charts === undefined) { // a save from before charts: credit the answers already given, and enough to carry on for a while
+        const given = S.quiz && S.quiz.stats ? S.quiz.stats.correct || 0 : 0;
+        S.charts = CFG.chartStart + given + 8 * Math.max(1, Math.ceil(CFG.chartBase * (1 + D.count / CFG.chartRamp)));
+      }
       if (S.laneRefund) { // saves from before the retirement of trade lanes
         const back = S.laneRefund * Math.ceil(claimCost() * 0.8);
         S.cash += back; log('Trade lanes were retired. Your ' + S.laneRefund + ' lane' + (S.laneRefund === 1 ? '' : 's') + ' were refunded: $' + fmt(back) + '.', 'info');
@@ -246,7 +256,7 @@
     function lvl(i) { const s = S.stars[i]; return s ? s.r + s.b + s.o : 0; }
 
     function perks() {
-      const p = { out: 0, speed: 0, slots: 0, res: 0, cost: 0, cap: 0, ev: 0, auto: 0, route: 0, star: 0 };
+      const p = { out: 0, speed: 0, slots: 0, res: 0, cost: 0, cap: 0, ev: 0, auto: 0, route: 0, star: 0, chart: 0 };
       for (const k of Object.keys(S.messier)) {
         const m = SKY.messier[k];
         const [kind, v] = MESSIER_PERK[m.kind];
@@ -669,6 +679,15 @@
       return out;
     }
     function targetsPending() { return new Set(S.fleets.filter(f => f.kind === 's').map(f => f.to).concat(S.orders.map(o => o.to))); }
+    // what a star costs in charts: its importance (the same multiplier as its price) times the size of the company, and a rival's star costs more.
+    // Taking back a colony you lost is free: its charts are still on file.
+    function chartCost(i) {
+      if (S.stars[i] || S.occupied[i]) return 0;
+      const rival = rivalOf(i) >= 0, n = D.count + inFlightClaims();
+      const raw = CFG.chartBase * priceMul(i) * (1 + n / CFG.chartRamp) * costMul() * (rival ? CFG.chartTakeoverMul : 1);
+      return Math.max(rival ? 2 : 1, Math.round(raw));
+    }
+    function grantCharts(n) { if (n > 0) { S.charts += n; S.stats.chartsEarned += n; } }
     function canLaunchTo(target) {
       if (S.stars[target]) return result(false, 'Already colonised.');
       const pend = targetsPending();
@@ -676,16 +695,19 @@
       if (S.orders.length >= CFG.orderMax) return result(false, 'The charter queue is full.');
       const reach = adj[target].some(n => S.stars[n.to] || pend.has(n.to));
       if (!reach) return result(false, 'No colony is connected to this star.');
-      if (S.cash < starPrice(target)) return result(false, 'Not enough cash.');
+      const needCash = S.cash < starPrice(target), cost = chartCost(target), needCharts = S.charts < cost - 1e-9;
+      if (needCash && needCharts) return result(false, 'Not enough cash, and it needs ' + plural(cost, 'chart') + ' (you have ' + Math.floor(S.charts) + '): Sky School pays charts for correct answers.');
+      if (needCharts) return result(false, 'Needs ' + plural(cost, 'chart') + ' (you have ' + Math.floor(S.charts) + '): Sky School pays charts for correct answers.');
+      if (needCash) return result(false, 'Not enough cash.');
       return result(true);
     }
     // Pay now, fly when a slot is free and a claimed star touches the target (so orders can chain outward, even offline).
     function launch(target) {
       const chk = canLaunchTo(target);
       if (!chk.ok) return chk;
-      const paid = starPrice(target), takeover = rivalOf(target) >= 0;
-      S.cash -= paid;
-      S.orders.push({ id: ++S.orderSeq, to: target, paid });
+      const paid = starPrice(target), charts = chartCost(target), takeover = rivalOf(target) >= 0;
+      S.cash -= paid; S.charts -= charts; S.stats.chartsSpent += charts;
+      S.orders.push({ id: ++S.orderSeq, to: target, paid, charts });
       dispatch();
       const flying = S.fleets.find(f => f.kind === 's' && f.to === target);
       recalc();
@@ -695,15 +717,16 @@
     function cancelOrder(id) {
       const k = S.orders.findIndex(o => o.id === id);
       if (k < 0) return result(false, 'No such order.');
-      S.cash += S.orders[k].paid; S.orders.splice(k, 1);
+      refundOrder(S.orders[k]); S.orders.splice(k, 1);
       recalc();
       return result(true, 'Charter cancelled and refunded.');
     }
+    function refundOrder(o) { S.cash += o.paid; if (o.charts) { S.charts += o.charts; S.stats.chartsSpent -= o.charts; } }
     function dispatch() {
       let sent = false;
       for (let k = 0; k < S.orders.length && S.fleets.length < D.slots;) {
         const o = S.orders[k];
-        if (S.stars[o.to]) { S.cash += o.paid; S.orders.splice(k, 1); continue; } // got there another way
+        if (S.stars[o.to]) { refundOrder(o); S.orders.splice(k, 1); continue; } // got there another way
         const origins = frontierOrigins(o.to).map(x => Object.assign(x, { sec: travelSeconds(x.from, x.deg, false, x.e) })).sort((a, b) => a.sec - b.sec);
         if (!origins.length) { k++; continue; }
         const x = origins[0];
@@ -1263,7 +1286,7 @@
       get state() { return S; }, get d() { return D; },
       newGame, load, recalc, tick, catchUp,
       claimCost, upgradeCost, messierCost, developMessierCost, travelSeconds,
-      canLaunchTo, launch, cancelOrder, dispatch, frontierOrigins, targetsPending, canVisitMessier, visitMessier, messierAccess, developMessier,
+      canLaunchTo, chartCost, grantCharts, launch, cancelOrder, dispatch, frontierOrigins, targetsPending, canVisitMessier, visitMessier, messierAccess, developMessier,
       upgrade, collect, collectConstellation, canCollectConstellation, grant, stockCap, resCap,
       buildingsAt, buildingAt, slotsAt, buildingCost, canBuild, build, canDemolish, demolish, buildingSummary, allBuildings, hubCoverage,
       techStatus, techCost, canStartTech, startTech, techCount, rankInfo, valuation, priceTarget, setCorpName,

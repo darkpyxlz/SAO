@@ -11,6 +11,7 @@ function mk(homeName = 'Sirius', seed = 1) {
   let t = 1e12;
   const G = Engine.create(SKY, { rng: seeded(seed), now: () => t });
   G.newGame(G.nameIdx.get(homeName));
+  G.state.charts = 1e9; // most tests are about something else: charts are tested on their own
   return G;
 }
 
@@ -174,7 +175,7 @@ test('old v1 saves migrate (wonder fields are dropped)', () => {
 
 test('no unique powers: only Messier objects change global modifiers', () => {
   const G = mk('Sirius');
-  assert.deepEqual(G.d.P, { out: 0, speed: 0, slots: 0, res: 0, cost: 0, cap: 0, ev: 0, auto: 0, route: 0, star: 0 });
+  assert.deepEqual(G.d.P, { out: 0, speed: 0, slots: 0, res: 0, cost: 0, cap: 0, ev: 0, auto: 0, route: 0, star: 0, chart: 0 });
   for (const n of ['Aldebaran', 'Antares', 'Fomalhaut', 'Spica']) G.state.stars[G.nameIdx.get(n)] = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0 };
   G.recalc();
   assert.equal(G.d.P.out, 0, 'no Royal Stars bonus');
@@ -255,14 +256,16 @@ test('quiz: spaced repetition needs 10 spaced correct answers; early answers do 
   const QZ = Quiz.create(G, { rng: seeded(9), now: () => t });
   const subj = { cat: 'const', id: 5 };
   const mkQ = () => ({ kind: 'x', cat: 'const', subject: subj, prompt: 'p', options: [{ text: 'a' }, { text: 'b' }], answer: 0, explain: 'e' });
-  const one = (choice = 0) => { const r = { cat: 'const', qs: [mkQ()], i: 0, correct: 0, streak: 0, best: 0, earned: { cash: 0, research: 0 }, answers: [], done: false }; return QZ.answer(r, choice); };
-  const before = G.state.cash;
+  const one = (choice = 0) => { const r = { cat: 'const', qs: [mkQ()], i: 0, correct: 0, streak: 0, best: 0, earned: { charts: 0 }, answers: [], done: false }; return QZ.answer(r, choice); };
+  const before = G.state.charts, cash0 = G.state.cash;
   const first = one();
-  assert.ok(first.correct && first.counted && first.box === 1 && first.reward.item === Quiz.REWARD.firstTime);
-  assert.ok(G.state.cash > before);
-  // straight away: pays a trickle, does not advance
+  assert.ok(first.correct && first.counted && first.box === 1 && first.reward.item === Quiz.CHART.firstTime);
+  assert.equal(G.state.charts - before, Quiz.CHART.firstTime + Quiz.CHART.perfectBonus, 'the first correct answer pays charts (and this one-question round was perfect)');
+  assert.equal(G.state.cash, cash0, 'and no cash or research');
+  // straight away: pays nothing, does not advance
+  const mid = G.state.charts;
   const soon = one();
-  assert.ok(soon.correct && !soon.counted && soon.box === 1 && soon.reward.item === Quiz.REWARD.tooSoon);
+  assert.ok(soon.correct && !soon.counted && soon.box === 1 && soon.reward.item === Quiz.CHART.tooSoon && soon.reward.charts === 0 && G.state.charts === mid, 'answering too soon pays no charts');
   assert.ok(soon.nextReviewMs > 0);
   // a wrong answer drops two boxes (never below 0)
   const wrong = one(1);
@@ -291,10 +294,12 @@ test('quiz: rounds pay a perfect-round bonus and due items are asked first', () 
   const G = mk('Sirius', 6);
   const QZ = Quiz.create(G, { rng: seeded(3), now: () => t });
   const r = QZ.startRound('const');
-  const s0 = G.state.cash;
+  const s0 = G.state.charts;
   r.qs.forEach(q => QZ.answer(r, q.answer));
-  assert.ok(r.done && r.bonus && r.bonus.cash > 0, 'perfect round bonus');
-  assert.ok(G.state.cash - s0 > r.earned.cash, 'bonus paid on top');
+  const C = Quiz.CHART, streaks = r.qs.length - C.streakFrom + 1;
+  assert.ok(r.done && r.bonus && r.bonus.charts === C.perfectBonus, 'perfect round bonus');
+  assert.equal(r.earned.charts, r.qs.length * C.firstTime + streaks * C.streakBonus, 'five new items: two charts each, and a bonus from the third correct answer on');
+  assert.equal(G.state.charts - s0, r.earned.charts + r.bonus.charts, 'bonus paid on top');
   // after answering, those five items are not due; a new round should prefer other items
   const seen = new Set(r.qs.map(q => q.subject.id));
   let overlap = 0, total = 0;
@@ -397,23 +402,24 @@ test('buildings: a Clearing House banks revenue automatically for a connected re
   const home = G.state.home, region = regionOf(G, home, 3);
   claimMany(G, region);
   G.state.cash = 1e9; G.state.research = 1e6;
-  unlock(G, 'electricity', 'computing');
+  unlock(G, 'electricity', 'ledgers');
   G.state.stars[home].r = 3; G.recalc();
+  const tech = G.d.P.auto; assert.ok(Math.abs(tech - 0.35) < 1e-9, 'bookkeeping banks 35% by itself');
   assert.ok(G.build(home, 'clearing').ok);
   const covered = G.d.coverage[home];
   assert.ok(covered.length > 3 && covered.includes(home));
   const cs = covered.find(i => i !== home);
-  assert.ok(Math.abs(G.d.auto[cs] - 0.5) < 1e-6);
+  assert.ok(Math.abs(G.d.auto[cs] - (1 - (1 - tech) * 0.5)) < 1e-6);
   const w0 = G.state.cash;
   G.tick(600, false);
   assert.ok(G.state.cash - w0 > 0, 'cash grows on its own');
   assert.ok(G.state.stats.auto > 0);
   G.tick(1e6, false);
-  assert.ok(Math.abs(G.state.stars[cs].s - G.stockCap(cs)) < 1e-6, 'only the un-banked half waits in storage');
+  assert.ok(Math.abs(G.state.stars[cs].s - G.stockCap(cs)) < 1e-6, 'only the un-banked part waits in storage');
   assert.ok(G.stockCap(cs) < G.d.rate[cs] * G.d.cap[cs]);
   // level 2 reaches further and banks more
   assert.ok(G.build(home, 'clearing').ok);
-  assert.ok(Math.abs(G.d.auto[cs] - 0.7) < 1e-6);
+  assert.ok(Math.abs(G.d.auto[cs] - (1 - (1 - tech) * 0.3)) < 1e-6);
   assert.ok(G.d.coverage[home].length >= covered.length);
   // with every route out of the hub cut, only the hub itself is covered
   G.state.events.push({ id: 99, kind: 'comet', name: 'x', edges: G.adj[home].map(x => x.e), restored: [], remaining: 99, total: 99, hits: 0, misses: 0, hint: false, paid: 0, where: '', center: home });
@@ -591,7 +597,7 @@ test('saves from v3 (hubs, Starlight, Insight) migrate to the corporation: cash,
   assert.equal(H.state.starlight, undefined); assert.equal(H.state.hubs, undefined);
   assert.equal(H.state.petitions[0].research, 4);
   assert.equal(H.buildingAt(home, 'clearing').lvl, 2);
-  assert.ok(H.state.tech.done.computing && H.state.tech.done.electricity && H.state.tech.done.telescope, 'needed technologies are credited');
+  assert.ok(H.state.tech.done.ledgers && H.state.tech.done.telescope, 'needed technologies are credited');
   assert.ok(H.state.corp.name && H.state.market.price > 0);
   H.catchUp(100);
 });
@@ -651,15 +657,15 @@ test('flagships: the named stars collect royalties, never bank themselves, and p
   // the vault holds a day, ordinary colonies hold their class's hours
   assert.ok(Math.abs(G.stockCap(home) - G.d.accr[home] * G.CFG.flagshipCapH * 3600 * (1 + G.profileOf(home).cap)) < 1e-6);
   // nothing banks a flagship: not Treasury technology, not a Clearing House
-  unlock(G, 'telegraph', 'electricity', 'computing', 'eft');
-  assert.ok(Math.abs(G.d.P.auto - 0.55) < 1e-9);
+  unlock(G, 'ledgers', 'telegraph', 'electricity', 'computing', 'eft');
+  assert.ok(Math.abs(G.d.P.auto - 0.72) < 1e-9);
   const ord = others[0];
-  assert.ok(Math.abs(G.d.auto[ord] - 0.55) < 1e-6, 'ordinary colonies bank 55%');
+  assert.ok(Math.abs(G.d.auto[ord] - 0.72) < 1e-6, 'ordinary colonies bank 72%');
   assert.equal(G.d.auto[home], 0, 'the flagship banks nothing');
   G.state.cash = 1e9; G.state.research = 1e6; G.state.stars[home].r = 3; G.recalc();
   assert.ok(G.build(home, 'clearing').ok);
   assert.equal(G.d.auto[home], 0); assert.equal(G.d.autoRes[home], 0);
-  assert.ok(G.d.auto[ord] > 0.55 && G.d.autoRes[ord] > 0, 'a Clearing House stacks on top for ordinary colonies');
+  assert.ok(G.d.auto[ord] > 0.72 && G.d.autoRes[ord] > 0, 'a Clearing House stacks on top for ordinary colonies');
   // collecting pays the premium, and one-tap constellation collection leaves flagships alone
   G.tick(3 * 3600, false);
   const stock = S.stars[home].s, cash0 = S.cash;
@@ -682,7 +688,7 @@ test('every stage of the game still needs visits to the important stars', () => 
   // a large share of the income still waits in flagship vaults
   const G = mk('Sirius', 2);
   const S = G.state, home = S.home;
-  unlock(G, 'telegraph', 'electricity', 'computing', 'eft', 'radio', 'internet', 'satellites', 'orbit', 'rocketry', 'payments');
+  unlock(G, 'ledgers', 'telegraph', 'electricity', 'computing', 'eft', 'radio', 'internet', 'satellites', 'orbit', 'rocketry', 'payments');
   assert.ok(Math.abs(G.d.P.auto - 0.8) < 1e-9);
   const order = [home]; const seen = new Set([home]);
   for (let k = 0; k < order.length && order.length < 760; k++) for (const { to } of G.adj[order[k]]) if (!seen.has(to)) { seen.add(to); order.push(to); }
@@ -797,7 +803,7 @@ test('quests: a fully built and fully studied sky completes every story quest, a
   // every kind of building at level 3 on enough colonies, without going through the slot rules
   G.d.claimed.forEach(i => { S.buildings[i] = kinds.map(id => ({ id, lvl: 3, t: 0, paid: { cash: 0, research: 0 } })); });
   for (let e = 0; e < 30; e++) S.routeLvl[e] = 3;
-  Object.assign(S.stats, { collected: 2e11, auto: 1e11, upgrades: 1e4, eventsDone: 100, perfect: 50, restoredRoutes: 500, petitionsDone: 200, collects: 2e4, routeUps: 1000, flagCollects: 2000, flagCash: 1e10, marketEvents: 100, takeovers: 500, flagTakeovers: 20, capitals: 3, acquired: 3, repelled: 20, reclaimed: 20, reinforced: 100 });
+  Object.assign(S.stats, { collected: 2e11, auto: 1e11, upgrades: 1e4, eventsDone: 100, perfect: 50, restoredRoutes: 500, petitionsDone: 200, collects: 2e4, routeUps: 1000, flagCollects: 2000, flagCash: 1e10, marketEvents: 100, takeovers: 500, flagTakeovers: 20, capitals: 3, acquired: 3, repelled: 20, reclaimed: 20, reinforced: 100, chartsEarned: 1e4, chartsSpent: 5000 });
   S.rivals.forEach(r => { r.contact = true; });
   G.YearSky.SHOWERS.forEach(sh => { S.showers[sh.id] = { t: 0, peak: 1 }; }); G.YearSky.COMETS.forEach(c => { S.comets[c.id] = { t: 0, perfect: true }; });
   Object.assign(S.quiz.stats, { answered: 6000, correct: 5000, rounds: 500, perfect: 200, bestStreak: 99 });
@@ -1237,7 +1243,7 @@ test('quests: a goal once reached stays reached when a rival takes a colony, and
   assert.equal(G.rankInfo().idx, rank, 'the company keeps its rank');
   const before = S.cash; assert.ok(QU.claim('claim25').ok); assert.ok(S.cash > before, 'and it can still be claimed');
   assert.equal((S.quests.reached || {}).claim25, undefined, 'a claimed goal is no longer kept in the reached list');
-  assert.ok(QU.STORY.length >= 394, 'the raid quests are in: ' + QU.STORY.length);
+  assert.ok(QU.STORY.length >= 404, 'the raid and chart quests are in: ' + QU.STORY.length);
 });
 
 test('quests: repelling, reinforcing, reclaiming and fortifying complete the raid goals', () => {
@@ -1284,6 +1290,147 @@ test('saves from before raids load with the raid fields, and old stats count fro
   assert.deepEqual(H.state.raids, []);
 });
 
+// ---------------------------------------------------------------- charts: the currency of knowledge, and the earlier Treasury
+test('charts: a colony ship needs charts as well as cash, and a charter holds them until it sails or is cancelled', () => {
+  const G = mk('Sirius', 31), S = G.state;
+  S.cash = 1e9; S.charts = 0;
+  const t = G.expansionTargets()[0], cost = G.chartCost(t);
+  assert.ok(cost >= 1);
+  let r = G.canLaunchTo(t);
+  assert.ok(!r.ok && /chart/.test(r.msg) && !/Not enough cash/.test(r.msg), r.msg);
+  assert.equal(G.launch(t).ok, false); assert.equal(S.cash, 1e9); assert.equal(S.orders.length + S.fleets.length, 0);
+  S.charts = cost - 0.5; assert.ok(!G.canLaunchTo(t).ok, 'half a chart is not enough');
+  S.cash = 0; S.charts = 0; assert.ok(/cash/.test(G.canLaunchTo(t).msg) && /chart/.test(G.canLaunchTo(t).msg), 'both are named when both are short');
+  S.cash = 1e9; S.charts = cost + 5;
+  r = G.launch(t); assert.ok(r.ok, r.msg);
+  assert.equal(S.charts, 5); assert.equal(S.stats.chartsSpent, cost);
+  // every ship out: the next charter queues, holding its cash and charts; cancelling gives both back
+  S.charts = 100; const spent0 = S.stats.chartsSpent;
+  const targets = G.expansionTargets();
+  for (let k = 0; k < 4 && k < targets.length; k++) G.launch(targets[k]);
+  assert.ok(S.orders.length >= 1, 'a charter is queued');
+  const o = S.orders[0], cash1 = S.cash, charts1 = S.charts;
+  assert.ok(o.charts >= 1 && o.paid > 0);
+  assert.ok(G.cancelOrder(o.id).ok);
+  assert.equal(S.cash, cash1 + o.paid); assert.equal(S.charts, charts1 + o.charts); assert.equal(S.stats.chartsSpent, spent0 + (100 - charts1) - o.charts, 'the refund is taken off what was spent');
+});
+
+test('charts: the cost follows a star’s importance and the size of the company; a rival’s star costs more; taking back a colony of yours is free', () => {
+  const G = mk('Vega', 32), S = G.state;
+  const ofKind = k => SKY.stars.map((st, i) => i).find(i => !S.stars[i] && G.rivalOf(i) < 0 && G.starRank(i).kind === k);
+  const ord = ofKind('ordinary'), lead = ofKind('lead'), flag = G.FLAGS.find(f => !S.stars[f] && G.rivalOf(f) < 0);
+  assert.ok(ord !== undefined && lead !== undefined && flag !== undefined);
+  const grow = 1 + (G.d.count + 0) / G.CFG.chartRamp;
+  assert.equal(G.chartCost(ord), 1, 'an ordinary star takes one chart');
+  assert.equal(G.chartCost(lead), Math.round(G.CFG.chartBase * G.starRank(lead).mul * grow));
+  assert.equal(G.chartCost(flag), Math.round(G.CFG.chartBase * G.starRank(flag).mul * grow));
+  assert.ok(G.chartCost(flag) > G.chartCost(lead) && G.chartCost(lead) > G.chartCost(ord), 'flagships cost more than leads, which cost more than ordinary stars');
+  // a bigger company pays more
+  const small = G.chartCost(flag);
+  claimMany(G, SKY.stars.map((st, i) => i).filter(i => i !== flag && !S.stars[i] && G.rivalOf(i) < 0).slice(0, 380));
+  assert.ok(G.d.count > 300, 'a big company: ' + G.d.count);
+  assert.ok(G.chartCost(flag) > small * 1.5, 'the same flagship costs ' + small + ' charts to a small company and ' + G.chartCost(flag) + ' to a big one');
+  // a rival's star costs more, and at least two charts
+  const free = SKY.stars.map((st, i) => i).find(i => !S.stars[i] && G.rivalOf(i) < 0 && G.starRank(i).kind === 'ordinary');
+  const own = G.chartCost(free); S.owner[free] = 0; G.recalc();
+  assert.ok(G.chartCost(free) >= 2 && G.chartCost(free) >= own, 'a rival’s ordinary star: ' + G.chartCost(free));
+  const fl = G.FLAGS.find(f => !S.stars[f] && G.rivalOf(f) < 0);
+  if (fl !== undefined) { const b = G.chartCost(fl); S.owner[fl] = 1; G.recalc(); assert.equal(G.chartCost(fl), Math.round(G.CFG.chartBase * G.starRank(fl).mul * (1 + G.d.count / G.CFG.chartRamp) * G.CFG.chartTakeoverMul)); assert.ok(G.chartCost(fl) > b); }
+  // a colony of yours that a rival occupies is taken back without charts
+  const mine = Object.keys(S.stars).map(Number).find(i => i !== S.home && !G.isFlagship(i));
+  S.occupied[mine] = { r: 1, b: 0, o: 0, t: 0, by: 0, at: 0 }; S.owner[mine] = 0; delete S.stars[mine]; G.recalc();
+  assert.equal(G.chartCost(mine), 0, 'its charts are still on file');
+  S.cash = 1e12; S.charts = 0;
+  const near = G.adj[mine].map(n => n.to).find(x => S.stars[x]);
+  assert.ok(near !== undefined);
+  const r = G.launch(mine); assert.ok(r.ok, r.msg); assert.equal(S.stats.chartsSpent, 0);
+});
+
+test('charts: a new company starts with some; an older save is credited for the answers it has given; technology and the Star Atlas lift what answers pay', () => {
+  const G = mk('Sirius', 33);
+  const fresh = Engine.create(SKY, { rng: seeded(1), now: () => 1e12 }); fresh.newGame(fresh.nameIdx.get('Sirius'));
+  assert.equal(fresh.state.charts, fresh.CFG.chartStart);
+  assert.equal(fresh.state.research, fresh.CFG.startResearch);
+  const old = JSON.parse(G.serialize());
+  delete old.charts; old.quiz.stats.correct = 150; delete old.stats.chartsEarned; delete old.stats.chartsSpent;
+  const H = Engine.create(SKY, { rng: seeded(2), now: () => 1e12 }); H.load(old);
+  assert.ok(H.state.charts >= H.CFG.chartStart + 150 + 8, 'credited for 150 answers and given a head start: ' + H.state.charts);
+  assert.equal(H.state.stats.chartsEarned, 0); assert.equal(H.state.stats.chartsSpent, 0);
+  const again = Engine.create(SKY, { rng: seeded(3), now: () => 1e12 }); again.load(JSON.parse(H.serialize()));
+  assert.equal(again.state.charts, H.state.charts, 'a save that has charts keeps them');
+  // the Star Atlas: +20% on every answer
+  const QZ = Quiz.create(G, { rng: seeded(9), now: () => 1e12 });
+  const y0 = QZ.chartYield().perAnswer;
+  unlock(G, 'atlas', 'space_telescope', 'internet');
+  assert.ok(Math.abs(G.d.P.chart - 0.6) < 1e-9);
+  assert.ok(Math.abs(QZ.chartYield().perAnswer - y0 * 1.6) < 1e-9);
+  const subj = { cat: 'const', id: 9 };
+  const q = { kind: 'x', cat: 'const', subject: subj, prompt: 'p', options: [{ text: 'a' }, { text: 'b' }], answer: 0, explain: 'e' };
+  G.state.charts = 5; const c0 = G.state.charts;
+  const res = QZ.answer({ cat: 'const', qs: [q, q], i: 0, correct: 0, streak: 0, best: 0, earned: { charts: 0 }, answers: [], done: false }, 0);
+  assert.ok(Math.abs(res.reward.charts - Quiz.CHART.firstTime * 1.6) < 1e-9 && Math.abs(G.state.charts - c0 - res.reward.charts) < 1e-9, 'the first answer pays ×1.6');
+});
+
+test('treasury: bookkeeping is researchable in the first minutes and banks 35% from then on; the ladder climbs to 80% and the Clearing House comes with it', () => {
+  const G = mk('Sirius', 34), S = G.state;
+  const c = G.techCost('ledgers');
+  assert.ok(c.research <= S.research && c.cash <= S.cash && c.secs <= 300, 'affordable from the first minute: ' + JSON.stringify(c) + ' with $' + S.cash + ' and ' + S.research + ' RP');
+  assert.equal(G.techStatus('ledgers'), 'available');
+  assert.ok(G.startTech('ledgers').ok);
+  G.tick(c.secs + 1, true);
+  assert.ok(S.tech.done.ledgers && !S.tech.active);
+  assert.ok(Math.abs(G.d.P.auto - 0.35) < 1e-9);
+  const nb = G.adj[S.home][0].to; claimMany(G, [nb]);
+  const ordinary = G.isFlagship(nb) ? G.adj[S.home][1].to : nb;
+  claimMany(G, [ordinary]);
+  assert.ok(Math.abs(G.d.auto[ordinary] - 0.35) < 1e-6 || G.isFlagship(ordinary), 'ordinary colonies bank 35%');
+  const ladder = ['ledgers', 'telegraph', 'eft', 'payments'].map(id => G.TECH_BY_ID[id].perks.auto);
+  assert.ok(Math.abs(ladder.reduce((a, b) => a + b, 0) - 0.8) < 1e-9, 'the whole ladder is still 80%: ' + ladder.join(' + '));
+  assert.deepEqual(G.TECH_BY_ID.telegraph.req, ['ledgers']);
+  assert.equal(G.TECH_BY_ID.ledgers.era, 0); assert.equal(G.BUILDINGS.clearing.tech, 'ledgers', 'a Clearing House needs only bookkeeping');
+  // it is far cheaper than it used to be: well under a tenth of the old first rung
+  assert.ok(G.TECH_BY_ID.telegraph.rp <= 20 && G.TECH_BY_ID.telegraph.secs <= 1200, 'the telegraph is a half-hour project');
+  // an older save that already has the telegraph is credited with what it needs
+  const old = JSON.parse(G.serialize()); old.tech.done = { telescope: 1, telegraph: 5 };
+  const H = Engine.create(SKY, { rng: seeded(2), now: () => 1e12 }); H.load(old);
+  assert.ok(H.state.tech.done.ledgers, 'the new requirement is credited');
+});
+
+test('pacing: a player who answers Sky School rounds expands; one who never does is held at the opening, so charts really are a prerequisite', () => {
+  const Q = Quiz;
+  const sim = (rounds, days) => {
+    let t = 1e12;
+    const G = Engine.create(SKY, { rng: mulberry32(11), now: () => t });
+    G.newGame(G.nameIdx.get('Sirius'));
+    const QZ = Q.create(G, { rng: mulberry32(5), now: () => t }), rnd = mulberry32(99), S = G.state;
+    const adv = (sec, active) => { t += sec * 1000; G.tick(sec, active); };
+    const act = () => {
+      for (const i of G.d.claimed) G.collect(i);
+      if (!S.tech.active) { const up = G.TECHS.filter(x => G.techStatus(x.id) === 'available' && G.canStartTech(x.id).ok).sort((a, b) => G.techCost(a.id).cash - G.techCost(b.id).cash)[0]; if (up) G.startTech(up.id); }
+      for (let guard = 0; guard < 60; guard++) {
+        const cand = new Set(G.frontier());
+        const free = [...cand].filter(x => G.canLaunchTo(x).ok).sort((a, b) => G.starPrice(a) - G.starPrice(b));
+        const ups = []; for (const i of G.d.claimed) for (const tr of ['r', 'b', 'o']) if (S.stars[i][tr] < 5) ups.push([i, tr, G.upgradeCost(i, tr)]);
+        ups.sort((a, b) => a[2] - b[2]);
+        if (free.length && G.launch(free[0]).ok) continue;
+        if (ups[0] && S.cash >= ups[0][2] && ups[0][2] < G.claimCost() * 0.4) { G.upgrade(ups[0][0], ups[0][1]); continue; }
+        break;
+      }
+    };
+    for (let d = 1; d <= days; d++) for (let v = 0; v < 3; v++) {
+      t += (86400 / 3 - 1200) * 1000; G.catchUp(86400 / 3 - 1200); act();
+      for (let r = 0; r < rounds; r++) { const round = QZ.startRound('mixed'); while (!round.done) { const q = round.qs[round.i]; QZ.answer(round, rnd() < 0.85 ? q.answer : (q.answer + 1) % q.options.length); adv(12, true); } }
+      act(); for (let x = rounds * 70; x < 1200; x += 30) { adv(30, true); if (x % 120 < 30) act(); }
+    }
+    return { count: G.d.count, earned: S.stats.chartsEarned, spent: S.stats.chartsSpent, auto: G.d.P.auto };
+  };
+  const none = sim(0, 12), some = sim(2, 12);
+  assert.ok(none.count <= 14 && none.earned === 0, 'without answers the company stops at the charts it started with: ' + JSON.stringify(none));
+  assert.ok(some.count > 150 && some.earned > 300, 'two rounds a visit carries it well beyond: ' + JSON.stringify(some));
+  assert.ok(some.auto >= 0.6, 'and the Treasury has already climbed past 60%: ' + some.auto);
+  assert.ok(some.spent <= some.earned + 12 + 1e-6, 'it cannot spend more charts than it earned and started with');
+});
+
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 test('random play (purchases, takeovers, raids, events, saves, years away) keeps every book straight', () => {
   let launched = 0, lost = 0, retaken = 0, repelled = 0;
@@ -1294,7 +1441,7 @@ test('random play (purchases, takeovers, raids, events, saves, years away) keeps
     for (let n = 0; n < 220; n++) {
       const S = G.state, a = rnd();
       if (a < 0.30) {
-        S.cash += 1e5 * (1 + G.d.count);
+        S.cash += 1e5 * (1 + G.d.count); S.charts += 3 + G.d.count / 20; // charts come slowly, so some launches are refused for want of them
         const free = G.expansionTargets(), take = G.takeoverTargets(), pool = rnd() < 0.7 || !take.length ? free : take;
         if (pool.length) G.launch(pool[Math.floor(rnd() * Math.min(pool.length, 6))]);
       } else if (a < 0.45) { const i = G.d.claimed[Math.floor(rnd() * G.d.claimed.length)]; G.upgrade(i, ['r', 'b', 'o'][Math.floor(rnd() * 3)]); }
@@ -1324,6 +1471,7 @@ test('random play (purchases, takeovers, raids, events, saves, years away) keeps
       for (const f of G.state.fleets) if (f.kind === 's') assert.ok(!G.state.stars[f.to], 'a ship is never bound for a star already yours');
       for (const r of G.state.rivals) assert.ok(r.n >= 0 && Number.isFinite(r.credit) && Number.isFinite(r.cool) && Number.isFinite(r.raidCredit) && r.raidCredit <= G.CFG.raidCreditCap + 1e-9);
       const S2 = G.state;
+      assert.ok(S2.charts >= -1e-9 && Number.isFinite(S2.charts) && S2.stats.chartsSpent >= -1e-9 && S2.stats.chartsEarned >= 0, 'charts are never negative');
       assert.ok(S2.stars[S2.home], 'the headquarters is never captured');
       for (const k of Object.keys(S2.occupied)) assert.ok(!S2.stars[k] && S2.owner[k] === S2.occupied[k].by, 'an occupied colony is a rival’s, with its levels waiting');
       for (const x of S2.raids) assert.ok(S2.stars[x.to] && x.to !== S2.home && S2.owner[x.from] === x.rival && x.remaining > 0 && x.remaining <= x.dur + 1e-9, 'a raid in flight is valid');

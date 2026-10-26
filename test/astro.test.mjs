@@ -170,13 +170,13 @@ test('academy: rounds can be limited to a topic and mixed rounds include the Aca
   assert.ok(easy > hard, 'basics first: ' + easy + ' vs ' + hard);
 });
 
-test('academy: answering feeds the spaced-repetition records and rewards cash', () => {
+test('academy: answering feeds the spaced-repetition records and pays charts', () => {
   const { G, clock, QZ } = mk(6);
   const round = QZ.startRound('astro', 5, { topic: 'light' });
-  const cash0 = G.state.cash;
+  const charts0 = G.state.charts;
   const res = QZ.answer(round, round.qs[0].answer);
   assert.ok(res.correct && res.counted && res.box === 1 && Array.isArray(res.academy));
-  assert.ok(G.state.cash > cash0);
+  assert.ok(G.state.charts > charts0);
   const id = round.qs[0].subject.id;
   assert.equal(G.state.quiz.astro[id].box, 1);
   assert.equal(QZ.items('astro').find(x => x.id === id).status, 'learning');
