@@ -439,6 +439,7 @@
         S.owner[best] = k;
         S.rivals.push({ id: k, name: Corp.defaultCompanyName(SKY.stars[best][6]), color: RIVAL_COLORS[k % RIVAL_COLORS.length], home: best, ratio: CFG.rivalRatios[k % CFG.rivalRatios.length], credit: 0.4, cool: 0, n: 1, lost: 0, retries: 0, contact: false, stuck: false });
       }
+      if (S.rivals.length) log('Rival companies are founding too: ' + S.rivals.map(r => r.name + ' (' + SKY.stars[r.home][6] + ')').join(', ') + '. They expand at about your pace and never attack.', 'rival');
     }
     // one star for rival r: next to what it holds (a lead or flagship is likelier), else the nearest free star by route. 0 = took one,
     // 1 = nothing it may take right now, 2 = no free star is left anywhere
