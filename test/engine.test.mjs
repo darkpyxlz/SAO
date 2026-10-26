@@ -1016,6 +1016,41 @@ test('rivals survive a save, play out identically from the same save, and an old
   assert.ok(Object.keys(H.state.owner).every(k => !H.state.stars[k]));
 });
 
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+test('random play (purchases, takeovers, events, saves, years away) keeps every book straight', () => {
+  for (let seed = 1; seed <= 3; seed++) {
+    const rnd = mulberry32(seed * 7919), clock = { t: Date.UTC(2025, 0, 1) + Math.floor(rnd() * 365) * 86400e3 };
+    let G = Engine.create(SKY, { rng: mulberry32(seed), now: () => clock.t });
+    G.newGame(G.nameIdx.get(['Sirius', 'Vega', 'Polaris'][seed % 3]));
+    for (let n = 0; n < 220; n++) {
+      const S = G.state, a = rnd();
+      if (a < 0.30) {
+        S.cash += 1e5 * (1 + G.d.count);
+        const free = G.expansionTargets(), take = G.takeoverTargets(), pool = rnd() < 0.7 || !take.length ? free : take;
+        if (pool.length) G.launch(pool[Math.floor(rnd() * Math.min(pool.length, 6))]);
+      } else if (a < 0.45) { const i = G.d.claimed[Math.floor(rnd() * G.d.claimed.length)]; G.upgrade(i, ['r', 'b', 'o'][Math.floor(rnd() * 3)]); }
+      else if (a < 0.55) { for (const i of G.d.claimed.slice(0, 20)) G.collect(i); }
+      else if (a < 0.65) {
+        S.events = []; const ev = G.spawnEvent();
+        if (ev) { const k = Math.floor(rnd() * (ev.edges.length + 1)); for (const e of ev.edges.slice(0, k)) G.redraw(ev.id, SKY.edges[e][0], SKY.edges[e][1]); if (rnd() < 0.5) S.events = []; G.recalc(); }
+      } else if (a < 0.85) { const dt = Math.floor(rnd() * 5000); clock.t += dt * 1000; G.tick(dt, rnd() < 0.6); }
+      else if (a < 0.93) { const dt = Math.floor(rnd() * 40 * 86400); clock.t += dt * 1000; G.catchUp(dt); }
+      else {
+        const H = Engine.create(SKY, { rng: mulberry32(seed + n), now: () => clock.t });
+        H.load(JSON.parse(G.serialize()));
+        assert.deepEqual(H.state.owner, G.state.owner, 'the rivals’ stars survive a save');
+        G = H;
+      }
+      const D = G.d, held = Object.keys(G.state.owner);
+      assert.ok(held.every(k => !G.state.stars[k]), 'no star is both yours and a rival’s');
+      assert.equal(G.rivals().reduce((x, r) => x + r.n, 0), held.length, 'the rivals’ counts match what they hold');
+      for (const v of [G.state.cash, G.state.research, D.totalRate, D.totalRes, D.globalOut]) assert.ok(Number.isFinite(v));
+      for (const f of G.state.fleets) if (f.kind === 's') assert.ok(!G.state.stars[f.to], 'a ship is never bound for a star already yours');
+      for (const r of G.state.rivals) assert.ok(r.n >= 0 && Number.isFinite(r.credit) && Number.isFinite(r.cool));
+    }
+  }
+});
+
 test('saves from v2 (before hubs and quests) load and gain the new fields', () => {
   const G = mk();
   const old = JSON.parse(G.serialize());

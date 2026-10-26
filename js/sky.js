@@ -275,7 +275,8 @@
       for (let i = 0; i < SH.length; i++) {
         shx[i] = px(shra[i]); shy[i] = py(shY[i]);
         const sh = SH[i], a = act.get(sh.id), u = up.get(sh.id);
-        const on = !!a, soon = !on && u && u.wait <= 30;
+        const hot = !!(ui.sel && ui.sel.type === 'shower' && ui.sel.i === i); // a selected radiant is always shown, even far from its dates
+        const on = !!a, soon = !on && u && (u.wait <= 30 || hot);
         shvis[i] = (on || soon) && shx[i] > -40 && shx[i] < W + 40 && shy[i] > -40 && shy[i] < H + 40 ? 1 : 0;
         if (!shvis[i]) continue;
         const X = shx[i], Yp = shy[i], lv = on ? 0.4 + 0.6 * a.activity : 0.35;
@@ -297,7 +298,6 @@
             ctx.strokeStyle = gr; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
           }
         }
-        const hot = ui.sel && ui.sel.type === 'shower' && ui.sel.i === i;
         if (hot) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(X, Yp, 17, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
         if (v.zoom > 0.55 || hot) {
           const when = on ? (Math.abs(a.daysToPeak) < 0.75 ? 'at its peak' : a.daysToPeak > 0 ? 'peak in ' + Math.round(a.daysToPeak) + ' d' : 'peak ' + Math.round(-a.daysToPeak) + ' d ago') : 'in ' + Math.round(u.wait) + ' d';

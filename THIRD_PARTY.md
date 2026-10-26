@@ -61,3 +61,12 @@ or under what licence; the pictures look like the usual public images of these o
 Heritage and amateur astrophotography as used on Wikipedia). The per-image credits are therefore unknown to this
 project. If you are a rights holder and want a photo credited or removed, please open an issue. To publish without
 any third-party photographs, delete the `img/` folder: the game falls back to its own procedural illustrations.
+
+# Meteor showers, comets and the ecliptic (`js/yearsky.js`)
+
+The meteor showers' radiants, dates, rates and speeds follow the International Meteor Organization's working list of
+visual meteor showers (https://www.imo.net/resources/calendar/), written out by hand and rounded; the comet notes (names,
+periods, discoveries, missions and perihelion dates) are well-known public facts, also written by hand and rounded.
+They are trivia for a game, not an observing guide: check the IMO calendar for the exact peak of a shower in a given
+year. The ecliptic maths (obliquity 23.4393°, the Sun's mean longitude) is the standard low-precision formula from the
+Astronomical Almanac. No data is fetched at run time.
