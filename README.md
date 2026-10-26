@@ -5,7 +5,7 @@ A corporate expansion game on the real night sky. Play it in the browser: **http
 You run a space corporation. Start with headquarters on one star and slowly colonise the whole celestial
 sphere. The sky is **one flat map** that you drag to pan, scroll or pinch to zoom, and that **wraps in both
 directions**: leave at the right and you come back on the left, leave over the north celestial pole and you
-arrive from the south pole (Miller cylindrical projection, with a faint graticule and the ecliptic). Every
+arrive from the south pole (Miller cylindrical projection, with a faint graticule and the ecliptic with its zodiac band). Every
 star on the 88 constellation stick figures is a possible colony (757 of them, with their real positions,
 brightness and colour). The figure lines are your trade routes; short "hyperlanes" join neighbouring
 constellations. All 110 Messier objects are survey sites. It is a solo, PvE game with no decay: three rival
@@ -70,13 +70,25 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   with its photograph. Study one in depth to double its bonus.
 - **Routes**: upgrade any route between colonies (3 levels) for a bigger trade bonus and faster ships.
 - **Comets and novae** cut routes for a while. Redraw the missing lines from memory for cash, a bonus for a
-  perfect redraw and research points. Their clocks only run while the game is open.
+  perfect redraw and research points. Their clocks only run while the game is open. Every comet is a real one
+  (19 of them: Halley, Hale–Bopp, Hyakutake, Swift–Tuttle, Churyumov–Gerasimenko, NEOWISE, Shoemaker–Levy 9, the
+  first interstellar comet Borisov…) and it is drawn on the map, with its ion tail pointing straight away from the
+  Sun and a curved dust tail; a nova flares at its star. Redraw a comet's routes to **catalogue** it (Codex → Sky, with
+  its story); each comet adds 1% to event rewards for good.
+- **The ecliptic and the year's sky** (press `Y`, or the ☄ button): the ecliptic, the Sun's road through the stars, is
+  drawn with its **zodiac band** (8° either side), a tick for each tropical sign with the date the Sun reaches it,
+  the equinoxes and solstices, and the two ecliptic poles. **Meteor showers** follow the real calendar (UTC): 13 annual
+  showers (Quadrantids to Ursids) show their radiant on the map while they run, with meteors streaking out of it, and
+  the next ones appear a month ahead. Colonies within 25° of a running radiant earn more, most at the peak (+23% for the weakest showers, up
+  to +100% for the Geminids), so there is a reason to be there; open the game during a shower with a colony under its radiant to
+  **watch** it for a small permanent bonus (double if you catch its peak, within a day of the maximum). There are no
+  planets, Moon or Sun on the map: just the ecliptic, the showers and the comets.
 - **Developed constellations**: colonise every star and develop each to ≥3 levels. It is stamped in the Codex
   (with a page per constellation: chart, lore, stars, neighbours, your own notes) and unlocks one-tap
   collection. **Mastered** at ≥9 levels each.
-- **Quests**: three repeatable *contracts* plus a story of more than 340 goals in sixteen chapters (Expansion,
+- **Quests**: three repeatable *contracts* plus a story of more than 380 goals in seventeen chapters (Expansion,
   Revenue, Corporation, Rivals, Development, Technology, Buildings, Routes, Flagships, Spectra, Messier, Landmarks,
-  Skies, Petitions, Sky School and the Olympiad Academy). The list offers the next goal of every chapter; tap a chapter
+  Skies, Calendar, Petitions, Sky School and the Olympiad Academy). The list offers the next goal of every chapter; tap a chapter
   to see everything left in it. Chapters reach from "colonise 2 stars" to "Earn $100B", "all 757 stars", every
   spectral class and brightness tier, each building and technology, the nine Messier showpieces, famous
   asterisms (Orion's Belt, the Summer Triangle, the Southern Cross, the Teapot, the Northern Cross, the Winter
@@ -98,7 +110,7 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   its next review time and right/wrong counts, filters for due / waiting / learned, and a *Review due items*
   button that starts a round about exactly those. Messier questions use real photographs (with procedural
   illustrations as the fallback).
-- **Olympiad Academy** (Corporation → Academy, key `A`): the astronomy-olympiad syllabus as 264 spaced-repetition
+- **Olympiad Academy** (Corporation → Academy, key `A`): the astronomy-olympiad syllabus as 281 spaced-repetition
   cards in ten topics: *Sky & time*, *Orbital mechanics*, *Telescopes & optics*, *Light & radiation*, *Stars*,
   *Magnitudes & distances*, *Stellar evolution*, *Solar system & exoplanets*, *Galaxies* and *Cosmology*. Cards are facts
   asked several ways, **diagrams** to recognise (nine telescope designs, mounts and optical defects, conic orbits,
@@ -131,14 +143,14 @@ Keys are ignored while you type in a text box, and window keys toggle (press aga
 | `Shift` `Space` | Send a ship to the best new star for every idle ship |
 | `N` / `M` / `G` / `P` | Jump to the next free star to colonise / Messier object to survey / flagship or colony with cash waiting (flagships first) / petition. `Shift` goes backwards |
 | `X` | Jump to the next rival star next to your territory, to take over (Space then sends the takeover fleet) |
-| `V` | Show or hide the empire borders |
+| `V` / `Y` | Show or hide the empire borders / the ecliptic and the meteor shower radiants |
 | `H` | Headquarters (while redrawing: show hints) |
 | `R` | Collect revenue at the selected colony (`Shift` `R`: the whole constellation once developed) |
 | `I` `L` `D` | Develop Industry, Logistics, R&D at the selected colony |
 | `1`…`9` `0` | Build or upgrade the numbered building in the selected colony's panel (the number is on its button) |
 | `E` | Redraw the routes cut by a comet or nova |
 | Arrows, `+` `-` | Pan (hold `Shift` for faster) and zoom the map, smoothly while held |
-| `←` `→`, digits | In windows: switch tabs; Codex and Menu: `1`…`5` jump to a tab; Corporation → Technology: `1`…`9` start the numbered project |
+| `←` `→`, digits | In windows: switch tabs; Codex and Menu: `1`…`6` jump to a tab; Corporation → Technology: `1`…`9` start the numbered project |
 | `Enter` | Quests: claim everything that is ready |
 | `1`…`5`, `A`…`D`, `Space`, `R`, `⌫` | Sky School: start a round, answer, next question / another round, review what is due, back |
 | `1`…`9` `0`, `Space`, `R`, `P`, `⌫` | Corporation → Academy: practise the numbered topic / everything / what is due; on a study page practise it, or go back |
@@ -157,7 +169,7 @@ It is a static site with no build step for the game itself.
 
 ```sh
 npm run serve        # http://localhost:8000
-npm test             # engine tests (data, economy, prices, rivals and takeovers, buildings, tech, events, quests, saves, pacing), Academy tests (every card, every generator checked against an independent calculation, every diagram drawn, levels and perks) and territory geometry tests
+npm test             # engine tests (data, economy, prices, rivals and takeovers, buildings, tech, events, quests, saves, pacing), Academy tests (every card, every generator checked against an independent calculation, every diagram drawn, levels and perks) and territory geometry tests and year's-sky tests (ecliptic maths against the equinoxes and solstices, the shower calendar, watching showers, cataloguing comets)
 ```
 
 | File | Purpose |
@@ -171,6 +183,7 @@ npm test             # engine tests (data, economy, prices, rivals and takeovers
 | `js/quests.js` | Quests: story chain and repeatable contracts (progress derived from game state). |
 | `js/pics.js` | Messier pictures: loads `img/messier/` photos, with procedural illustrations as placeholder/fallback. |
 | `img/messier/` | 110 resized Messier photographs (provenance in THIRD_PARTY.md). |
+| `js/yearsky.js` | The year's sky (no DOM): ecliptic maths, the 13 meteor showers with radiants, dates and parents, the 19 comets with their stories. |
 | `js/territory.js` | Territory geometry (no DOM): the ground nearest to each star on the wrapping map as a convex polygon with labelled edges, for empire fills and borders. |
 | `js/sky.js` | Flat wrapping map renderer (Miller projection), empire ground and borders, pan/zoom/pick, codex mini-charts. |
 | `js/ui.js` | Start screen, HUD, panels, corporation, Codex, redraw mode, keyboard shortcuts, saves, main loop. |

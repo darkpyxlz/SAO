@@ -76,6 +76,60 @@
       ['The Leonids (November) come from comet…', 'Tempel–Tuttle', ['Swift–Tuttle', 'Halley', 'Hale–Bopp']],
       ['The meteors of a shower appear to radiate from a point called the…', 'radiant', ['apex', 'nadir', 'zenith']],
     ], 'Parallel meteoroid streams look like they diverge from the radiant (perspective). Showers are named after the radiant’s constellation: Perseids, Geminids, Leonids, Orionids (Halley).');
+    // ---- the year's sky: cards drawn from the same tables the game uses (js/yearsky.js), so the cards, the map and the Codex always agree
+    const Y = typeof YearSky !== 'undefined' ? YearSky : require('./yearsky.js');
+    const uniq = a => [...new Set(a)];
+    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const radiantCons = uniq(Y.SHOWERS.map(s => s.con)), parentNames = uniq(Y.SHOWERS.map(s => s.parent));
+    const hm = ra => Math.floor(ra / 15) + 'h' + String(Math.round((ra / 15 % 1) * 60)).padStart(2, '0') + 'm';
+    for (const sh of Y.SHOWERS) {
+      const month = MONTH_NAMES[sh.peak[0] - 1];
+      const rates = uniq([Math.round(sh.speed * 0.5), Math.round(sh.speed * 0.75), Math.round(sh.speed * 1.5), Math.round(sh.speed * 2)].filter(v => v !== sh.speed)).map(v => v + ' km/s');
+      S.fact('shower-' + sh.id, 'Meteor shower: ' + sh.name, 2, [
+        ['The radiant of the ' + sh.name + ' lies in the constellation…', sh.con, radiantCons.filter(c => c !== sh.con), { why: 'The ' + sh.name + ' radiate from ' + sh.con + ' (right ascension ' + hm(sh.ra) + ', declination ' + (sh.dec >= 0 ? '+' : '−') + Math.abs(sh.dec) + '°). Showers are named after the constellation of their radiant.' }],
+        ['The meteoroids of the ' + sh.name + ' come from…', sh.parent, parentNames.filter(p => p !== sh.parent), { why: sh.name + ': ' + sh.parent + ' (' + sh.parentKind + '). ' + sh.note }],
+        ['The ' + sh.name + ' reach their peak in…', month, MONTH_NAMES.filter(m => m !== month), { why: 'The ' + sh.name + ' are active ' + sh.dates + ' and peak around ' + sh.peakText + ': the Earth meets the same stream on the same dates every year.' }],
+        ['The ' + sh.name + ' meteors strike the atmosphere at about…', sh.speed + ' km/s', rates, { why: sh.name + ' meteors enter at about ' + sh.speed + ' km/s (the Earth’s own orbital speed is 30 km/s; a head-on meeting gives the fastest, like the Leonids at 71 km/s). ' + sh.note }],
+      ], sh.note);
+    }
+    S.fact('shower-rates', 'Strongest, fastest, slowest', 3, [
+      ['Which of these showers usually has the highest rate at its peak (the zenithal hourly rate)?', 'Geminids', ['Lyrids', 'Leonids', 'Ursids', 'Draconids', 'Orionids']],
+      ['Which of these showers has the fastest meteors (about 71 km/s)?', 'Leonids', ['Geminids', 'Draconids', 'Quadrantids', 'Taurids']],
+      ['Which of these showers has the slowest meteors (about 20 km/s)?', 'Draconids', ['Perseids', 'Leonids', 'Orionids', 'Eta Aquariids']],
+      ['Which of these showers comes from an asteroid rather than a comet?', 'Geminids', ['Perseids', 'Leonids', 'Orionids', 'Eta Aquariids']],
+      ['Which two showers both come from Halley’s Comet?', 'The Eta Aquariids and the Orionids', ['The Perseids and the Leonids', 'The Geminids and the Quadrantids', 'The Lyrids and the Draconids']],
+      ['The Leonids can turn into a meteor storm about every…', '33 years, when comet Tempel–Tuttle returns', ['3 years', '76 years', '133 years']],
+    ], 'ZHR: Geminids 150, Quadrantids 110, Perseids 100, Eta Aquariids 50. Entry speed: Leonids 71 km/s, Orionids and Eta Aquariids 66, Perseids 59, Geminids 35, Draconids 20. The Geminids’ parent 3200 Phaethon is an asteroid; Halley feeds two showers because the Earth crosses its orbit twice, in May and in October.');
+    const N = id => Y.COMET_BY_ID[id].name, other = id => Y.COMETS.filter(c => c.id !== id).map(c => c.name);
+    const about = (prompt, id, why) => [prompt, N(id), other(id), { why: why || Y.COMET_BY_ID[id].note }];
+    S.fact('comet-missions', 'Spacecraft at comets', 2, [
+      about('Rosetta orbited, and its lander Philae landed on, comet…', '67p'),
+      about('The Deep Impact probe fired an impactor into comet…', 'tempel1'),
+      about('The Stardust mission brought dust from the coma of comet … back to Earth.', 'wild2'),
+      about('The spacecraft Giotto flew through the coma of…', 'halley'),
+      about('The first spacecraft to fly through a comet (ICE, in 1985) visited comet…', 'giacobini-zinner'),
+      about('The EPOXI probe flew past the very active comet…', 'hartley2'),
+    ], 'Comet missions: Giotto at Halley (1986), ICE at Giacobini–Zinner (1985), Stardust at Wild 2 (sample return 2006), Deep Impact at Tempel 1 (2005), EPOXI at Hartley 2 (2010), Rosetta and Philae at 67P (2014–16).');
+    S.fact('comet-records', 'Famous comets', 2, [
+      about('The Great Comet of 1997, visible to the naked eye for 18 months, was…', 'hale-bopp'),
+      about('The comet that was torn apart by Jupiter and struck it in July 1994 was…', 'sl9'),
+      about('The first confirmed interstellar comet, found in 2019, was…', 'borisov'),
+      about('The comet that split in two in 1846 and then vanished was…', 'biela'),
+      about('The comet with the shortest period of any well-known comet (3.3 years) is…', 'encke'),
+      about('The parent of the Perseids, the largest nucleus known to cross Earth’s orbit repeatedly (about 26 km), is…', 'swift-tuttle'),
+      about('The comet that was easy to see with the naked eye in July 2020, found by an infrared space telescope, was…', 'neowise'),
+      about('The sungrazer of 1965 that was bright enough to see in daylight was…', 'ikeya-seki'),
+    ], 'Hale–Bopp (1997), Shoemaker–Levy 9 (1994), Borisov (2019, on a hyperbolic orbit, e ≈ 3.4), Biela (split 1846), Encke (3.3 years), Swift–Tuttle (133 years), NEOWISE (2020), Ikeya–Seki (a Kreutz sungrazer).');
+    const SP = A.topic('sphere');
+    SP.fact('ecl-year', 'The ecliptic through the year', 1, [
+      ['At the June solstice the Sun is on the ecliptic at declination…', '+23.4° (its farthest north)', ['0°', '+66.6°', '−23.4°']],
+      ['At an equinox the Sun is…', 'on the celestial equator, where the ecliptic crosses it', ['at its farthest north', 'at the ecliptic pole', 'on the galactic plane']],
+      ['The north ecliptic pole lies in the constellation…', 'Draco', ['Ursa Minor', 'Cepheus', 'Lyra']],
+      ['The ecliptic is tilted 23.4° to the celestial equator because…', 'the Earth’s axis is tilted 23.4° to the plane of its orbit', ['the Moon pulls on the Earth', 'the Sun is off the centre of the orbit', 'the Milky Way is tilted']],
+      ['The March equinox point (the “First Point of Aries”) now lies in the constellation…', 'Pisces', ['Aries', 'Taurus', 'Cetus']],
+      ['The ecliptic poles lie … from the celestial poles.', '23.4°', ['0°', '66.6°', '90°']],
+      ['The zodiac band, within about 8° of the ecliptic, holds…', 'the Moon and the visible planets', ['all the Messier objects', 'only the Sun', 'the Milky Way']],
+    ], 'The ecliptic is the plane of Earth’s orbit on the sky. Its poles are 23.4° from the celestial poles (the north ecliptic pole is in Draco, the south in Dorado); the equinoxes are where it crosses the celestial equator, and precession (26 000 years) has carried the March equinox from Aries into Pisces.');
     S.fact('formation', 'Formation of the Solar System', 2, [
       ['The nebular hypothesis says the Solar System formed from…', 'a collapsing, rotating cloud of gas and dust', ['a collision of two stars', 'a star captured by another', 'a supernova blast alone']],
       ['The frost line (about 3–5 AU in the early Solar System) separates…', 'the rocky inner planets from the icy outer ones', ['stars from planets', 'asteroids from comets only', 'the Sun from its disc']],

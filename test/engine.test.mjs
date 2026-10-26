@@ -799,6 +799,7 @@ test('quests: a fully built and fully studied sky completes every story quest, a
   for (let e = 0; e < 30; e++) S.routeLvl[e] = 3;
   Object.assign(S.stats, { collected: 2e11, auto: 1e11, upgrades: 1e4, eventsDone: 100, perfect: 50, restoredRoutes: 500, petitionsDone: 200, collects: 2e4, routeUps: 1000, flagCollects: 2000, flagCash: 1e10, marketEvents: 100, takeovers: 500, flagTakeovers: 20, capitals: 3, acquired: 3 });
   S.rivals.forEach(r => { r.contact = true; });
+  G.YearSky.SHOWERS.forEach(sh => { S.showers[sh.id] = { t: 0, peak: 1 }; }); G.YearSky.COMETS.forEach(c => { S.comets[c.id] = { t: 0, perfect: true }; });
   Object.assign(S.quiz.stats, { answered: 6000, correct: 5000, rounds: 500, perfect: 200, bestStreak: 99 });
   const rec = () => ({ ok: 3000, bad: 0, last: 0, box: 10, due: 0, learned: 1 });
   for (let k = 0; k < SKY.consts.length; k++) S.quiz.const[k] = rec();

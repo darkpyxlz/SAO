@@ -57,6 +57,15 @@
     const rivalCount = () => G.CFG.rivalCount;
     const free = () => SKY.stars.length - G.d.count - G.rivals().reduce((n, r) => n + r.n, 0); // stars no one holds
     const biggestRival = () => G.rivals().reduce((m, r) => Math.max(m, r.n), 0);
+    // the zodiac band (within 8 degrees of the ecliptic), the four turning points of the Sun's year and the two ecliptic poles
+    const YS = G.YearSky;
+    const near = (lon, lat, deg) => { const [ra, dec] = YS.eclToEq(lon, lat); return SKY.stars.map((st, i) => i).filter(i => G.sepDeg(SKY.stars[i], { ra, dec }) <= deg); };
+    const bandStars = SKY.stars.map((st, i) => i).filter(i => Math.abs(YS.eqToEcl(SKY.stars[i][1], SKY.stars[i][2])[1]) <= 8);
+    const corners = YS.ECLIPTIC_POINTS.filter(p => Math.abs(p.lat) < 90).map(p => near(p.lon, p.lat, 8)), poles = [near(0, 90, 12), near(0, -90, 12)];
+    const heldOf = list => list.filter(i => G.state.stars[i]).length;
+    const showersWatched = () => Object.keys(G.state.showers).length;
+    const peaksCaught = () => Object.values(G.state.showers).filter(r => r.peak).length;
+    const cometsSeen = () => Object.keys(G.state.comets).length;
     const ZODIAC = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpius', 'Sagittarius', 'Capricornus', 'Aquarius', 'Pisces'];
     const zodiacColonised = () => ZODIAC.filter(n => G.consStatus(constIdx(n)).all).length;
 
@@ -99,6 +108,18 @@
     add('acq3', 'Rivals', 'Sole survivor', 'Acquire every rival company.', () => st().acquired, rivalCount(), 1500);
     [[50, 60], [150, 200], [300, 500], [500, 1200]].forEach(([n, m]) => add('margin' + n, 'Rivals', 'Lead by ' + n, 'Hold ' + n + ' more stars than the biggest rival company.', () => peak('margin', G.d.count - biggestRival()), n, m));
     add('full', 'Rivals', 'A full sky', 'Fill the sky: no star is left free, and every further star must be won by takeover.', () => SKY.stars.length - free(), SKY.stars.length, 60);
+
+    // ---- Calendar: the ecliptic, the meteor showers (watched on the real calendar) and the comets
+    [[10, 12], [25, 40], [50, 120], [bandStars.length, 400]].forEach(([n, m]) => add('band' + n, 'Calendar', n === bandStars.length ? 'The whole zodiac band' : 'The zodiac band: ' + n, 'Colonise ' + n + ' stars within 8° of the ecliptic (the shaded band on the map, press Y), ' + S_(bandStars.length, 'star', 'stars') + ' in all.', () => heldOf(bandStars), n, m));
+    add('corners4', 'Calendar', 'The Sun’s four corners', 'Colonise a star within 8° of each equinox and each solstice point (the diamonds on the ecliptic).', () => corners.filter(l => heldOf(l) > 0).length, 4, 90);
+    add('eclpoles', 'Calendar', 'Poles of the orbit', 'Colonise a star within 12° of each ecliptic pole (the north pole is in Draco, the south in Dorado).', () => poles.filter(l => heldOf(l) > 0).length, 2, 70);
+    [[1, 25], [3, 70], [6, 160], [10, 400], [YS.SHOWERS.length, 900]].forEach(([n, m]) => add('watch' + n, 'Calendar', n === 1 ? 'Wish upon a star' : n === YS.SHOWERS.length ? 'Every meteor shower' : 'Watch ' + n + ' meteor showers', 'Open the game while a meteor shower runs, with a colony within ' + YS.ZONE_DEG + '° of its radiant, to watch it. Showers come on fixed dates, so this is a goal for the whole year.', showersWatched, n, m));
+    [[1, 60], [3, 150], [7, 450], [YS.SHOWERS.length, 1100]].forEach(([n, m]) => add('peak' + n, 'Calendar', n === 1 ? 'At the peak' : 'Catch ' + n + ' peaks', 'Catch the peak of ' + S_(n, 'meteor shower', 'meteor showers') + ': be playing within a day of its maximum with a colony under the radiant.', peaksCaught, n, m));
+    YS.SHOWERS.forEach(sh => add('w_' + sh.id, 'Calendar', 'Watch the ' + sh.name, 'The ' + sh.name + ' run ' + sh.dates + ' and peak around ' + sh.peakText + ' (up to ' + sh.zhr + ' an hour, radiant in ' + sh.con + '). Have a colony within ' + YS.ZONE_DEG + '° of the radiant while you play.', () => (G.state.showers[sh.id] ? 1 : 0), 1, 30 + Math.round(sh.zhr / 4)));
+    [[1, 15], [5, 60], [10, 200], [YS.COMETS.length, 500]].forEach(([n, m]) => add('comet' + n, 'Calendar', n === 1 ? 'A comet for the catalogue' : n === YS.COMETS.length ? 'Every comet' : 'Catalogue ' + n + ' comets', 'Redraw every route a comet cuts to catalogue it in the Codex (Sky tab). Each comet adds ' + (G.CFG.cometLore * 100).toFixed(0) + '% to event rewards.', cometsSeen, n, m));
+    [[3, 100], [10, 400]].forEach(([n, m]) => add('cperfect' + n, 'Calendar', 'Perfect on ' + n + ' comets', 'Catalogue ' + n + ' comets with a perfect redraw: no misses and no hints.', () => Object.values(G.state.comets).filter(c => c.perfect).length, n, m));
+    add('cparents', 'Calendar', 'Parents of the showers', 'Catalogue the comets behind the showers: Halley, Swift–Tuttle, Tempel–Tuttle, Giacobini–Zinner, Encke and Thatcher.', () => ['halley', 'swift-tuttle', 'tempel-tuttle', 'giacobini-zinner', 'encke', 'thatcher'].filter(id => G.state.comets[id]).length, 6, 160);
+    [['halley', 30], ['hale-bopp', 35], ['neowise', 30], ['sl9', 40], ['borisov', 40]].forEach(([id, m]) => add('c_' + id, 'Calendar', 'Catalogue ' + YS.COMET_BY_ID[id].name, 'Catalogue ' + YS.COMET_BY_ID[id].name + ' (' + YS.COMET_BY_ID[id].desig + ') by redrawing the routes it cuts.', () => (G.state.comets[id] ? 1 : 0), 1, m));
 
     // ---- Spectra: every spectral class and brightness tier
     const SP = G.Corp.SPECTRAL;
@@ -249,7 +270,7 @@
       return { id: d.id, kind: 'story', chapter: d.chapter, title: d.title, desc: d.desc, cur: Math.min(cur, d.target), target: d.target, done, claimed, reward: rewardFor(d.mins) };
     }
     // the chapters in the order a company meets them
-    const CHAPTERS = ['Expansion', 'Revenue', 'Corporation', 'Rivals', 'Development', 'Technology', 'Buildings', 'Routes', 'Flagships', 'Spectra', 'Messier', 'Landmarks', 'Skies', 'Petitions', 'Sky School', 'Academy'];
+    const CHAPTERS = ['Expansion', 'Revenue', 'Corporation', 'Rivals', 'Development', 'Technology', 'Buildings', 'Routes', 'Flagships', 'Spectra', 'Messier', 'Landmarks', 'Skies', 'Calendar', 'Petitions', 'Sky School', 'Academy'];
     const BLURB = {
       Expansion: 'A startup with one telescope and a dream. Every colony ship you send turns another point of light into a business.',
       Rivals: 'Three rival companies follow your lead across the sky. They never attack, but they hold the stars they take: win them over, one takeover at a time.',
@@ -264,6 +285,7 @@
       Messier: 'Clusters, nebulae and galaxies. Survey them, then study them in depth for permanent bonuses.',
       Landmarks: 'The shapes people have traced in the sky for thousands of years: Orion’s Belt, the Summer Triangle, the Plough.',
       Skies: 'Comets and novae cut trade routes now and then. Redraw them and the sky repays you.',
+      Calendar: 'The sky keeps a calendar: the Sun’s road through the zodiac, meteor showers that return on the same dates every year, and the comets that visit when they will.',
       Petitions: 'Colonies write in with small requests. Granting them is good business and good manners.',
       'Sky School': 'Know the sky and it pays you back: constellations, stars and Messier objects, each reviewed until it sticks.',
       Academy: 'The Olympiad syllabus, topic by topic. Every level you earn is a permanent bonus to the whole company.',

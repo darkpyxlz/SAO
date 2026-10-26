@@ -2,9 +2,9 @@
    You run a corporation that colonises the night sky: cash from colonies, research for technology, buildings
    from human technology, trade routes, comets and novae, and a stock price that tracks how you are doing. */
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory(require('./corp.js'), require('./astro.js'));
-  else root.Engine = factory(root.Corp, root.Astro);
-})(typeof self !== 'undefined' ? self : this, function (Corp, Astro) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./corp.js'), require('./astro.js'), require('./yearsky.js'));
+  else root.Engine = factory(root.Corp, root.Astro, root.YearSky);
+})(typeof self !== 'undefined' ? self : this, function (Corp, Astro, YearSky) {
   'use strict';
 
   const { BUILDINGS, BUILDING_MAX, BUILD_LEVEL_MUL, TECHS, TECH_BY_ID, RANKS, MARKETS } = Corp;
@@ -55,6 +55,9 @@
     // rival companies expand at a fixed share of YOUR pace: every colony you add earns each rival `ratio` colonies of credit, and a
     // rival spends credit one star at a time. They hold the stars they take; you can take them over, but they never attack you.
     rivalCount: 3, rivalRatios: [0.9, 0.75, 0.6], rivalGap: [5, 25], rivalCreditCap: 10, rivalRetry: 45, rivalSafeHops: 2,
+    // the year's sky: colonies near the radiant of a meteor shower that is running (on the real calendar) earn more; every shower you
+    // have watched is a small permanent bonus (double if you caught its peak), and every comet you have redrawn improves event rewards
+    showerWatch: 0.003, cometLore: 0.01,
   };
   const RIVAL_COLORS = ['#ff8aa8', '#7fe0a6', '#c9a0ff', '#ffb06a'];
   const ROUTE_MAX = 3;
@@ -115,6 +118,9 @@
     };
     const RANK_OF = SKY.stars.map((st, i) => (isFlag[i] ? 'flagship' : isLead[i] ? 'lead' : st[3] < 2 ? 'brilliant' : st[3] < 3 ? 'bright' : 'ordinary'));
     const priceMul = i => CFG[STAR_RANKS[RANK_OF[i]].price];
+    // the colonies a meteor shower's radiant can reach: every star within ZONE_DEG of it
+    const showerZone = {};
+    YearSky.SHOWERS.forEach(sh => { showerZone[sh.id] = SKY.stars.map((st, i) => i).filter(i => sepDeg(SKY.stars[i], { ra: sh.ra, dec: sh.dec }) <= YearSky.ZONE_DEG); });
     // constellations that touch each other (for the codex)
     const consNeighbours = Array.from({ length: NC }, () => new Set());
     SKY.edges.forEach(e => {
@@ -137,7 +143,7 @@
         corp: { name: corpName || Corp.defaultCompanyName(SKY.stars[home][6]), founded: nowFn(), rank: 0 },
         tech: { done: { telescope: nowFn() }, active: null },
         market: blankMarket(),
-        rivals: [], owner: {}, rseed: 0,
+        rivals: [], owner: {}, rseed: 0, showers: {}, comets: {}, skyKey: 0,
         stars: {}, fleets: [], orders: [], messier: {}, devConst: {}, masterConst: {}, buildings: {}, routeLvl: {}, quests: { claimed: {}, contracts: [], seq: 0 },
         events: [], eventTimer: rand(CFG.eventFirstDelay), petitions: [], petitionTimer: rand(CFG.petitionGap),
         notes: {}, quiz: blankQuiz(), academy: { lvl: {} }, log: [], evSeq: 0, petitionSeq: 0, fleetSeq: 0, orderSeq: 0,
@@ -213,7 +219,7 @@
       if (!S.tech.done) S.tech.done = {};
       S.tech.done.telescope = S.tech.done.telescope || nowFn();
       S.market = Object.assign(blankMarket(), S.market);
-      S.owner = S.owner || {};
+      S.owner = S.owner || {}; S.showers = S.showers || {}; S.comets = S.comets || {}; S.skyKey = S.skyKey || 0;
       const hadRivals = Array.isArray(S.rivals) && S.rivals.length > 0;
       if (!hadRivals) S.rivals = [];
       recalc();
@@ -243,6 +249,8 @@
         if (t) for (const [k, v] of Object.entries(t.perks)) p[k] += v;
       }
       for (const t of Astro.TOPICS) { const l = S.academy.lvl[t.id] || 0; if (l) p[t.perk.kind] += Astro.perkAt(t.id, l); } // Olympiad Academy levels never go down
+      for (const id of Object.keys(S.showers)) if (YearSky.SHOWER_BY_ID[id]) p.out += CFG.showerWatch * (S.showers[id].peak ? 2 : 1); // showers you have watched
+      p.ev += CFG.cometLore * Object.keys(S.comets).filter(id => YearSky.COMET_BY_ID[id]).length; // comets you have redrawn
       return p;
     }
     function marketMods() {
@@ -327,6 +335,14 @@
       const starK = 1 + P.star; // the Academy's star-classification topic strengthens every spectral and brightness bonus
       const rate = new Float64Array(N), resRate = new Float64Array(N), cap = new Float64Array(N);
       const routeMul = new Float64Array(N).fill(1);
+      // meteor showers that are running now (on the real calendar): colonies under a radiant earn more, the more so near the peak
+      const showerMul = new Float32Array(N).fill(1), showers = [];
+      for (const x of YearSky.activeShowers(nowFn())) {
+        const sh = x.shower, boost = YearSky.showerBoost(sh) * x.activity;
+        let under = 0;
+        for (const i of showerZone[sh.id]) if (S.stars[i]) { under++; showerMul[i] = Math.max(showerMul[i], 1 + boost); }
+        showers.push({ id: sh.id, activity: x.activity, boost, colonies: under, daysToPeak: x.daysToPeak });
+      }
       let routes = 0;
       SKY.edges.forEach((e, i) => {
         const [a, b] = e;
@@ -340,7 +356,7 @@
       let totalRate = 0, totalRes = 0, beacons = 0;
       for (const i of claimed) {
         const s = S.stars[i];
-        rate[i] = baseRate[i] * (1 + 0.5 * s.r) * routeMul[i] * globalOut * Math.max(0.2, 1 + revB[i] + profile[i].rev * starK);
+        rate[i] = baseRate[i] * (1 + 0.5 * s.r) * routeMul[i] * globalOut * Math.max(0.2, 1 + revB[i] + profile[i].rev * starK) * showerMul[i];
         resRate[i] = (CFG.researchPerLevel * s.o + resB[i] + profile[i].res * starK) * resMul * labMul[i];
         cap[i] = (isFlag[i] ? CFG.flagshipCapH : CLASS_CAP_H[cls[i]]) * 3600 * (1 + P.cap) * (1 + stockB[i] + profile[i].cap * starK);
         totalRate += rate[i]; totalRes += resRate[i]; beacons += s.b;
@@ -361,7 +377,7 @@
       let manual = 0; for (const i of claimed) manual += accr[i] * (1 - auto[i]);
       const manualShare = totalRate > 0 ? manual / totalRate : 1; // the part of your income that waits for a visit
       const slots = CFG.baseSlots + Math.floor(beacons / 5 + P.slots + yardSlots + launchSlots + 1e-9);
-      D = { claimed, P, M, dis, rate, resRate, cap, auto, autoRes, accr, homeOf, tribs, manualShare, starK, yardSpeed, speedB, revB, coverage, routeMul, routes, totalRate, totalRes, slots, globalOut, resMul, buildingCount, count: claimed.length };
+      D = { showerMul, showers, claimed, P, M, dis, rate, resRate, cap, auto, autoRes, accr, homeOf, tribs, manualShare, starK, yardSpeed, speedB, revB, coverage, routeMul, routes, totalRate, totalRes, slots, globalOut, resMul, buildingCount, count: claimed.length };
       // promotions
       const rk = rankInfo();
       if (rk.idx > (S.corp.rank || 0)) { S.corp.rank = rk.idx; log('Promotion! ' + S.corp.name + ' is now a ' + rk.title + '.', 'rank'); }
@@ -862,8 +878,7 @@
     function dismissPetition(id) { S.petitions = S.petitions.filter(p => p.id !== id); }
 
     // ---- events (comets & novae)
-    const COMET_NAMES = ['Aurelia', 'Boreas', 'Calypso', 'Dione', 'Elara', 'Faye', 'Galatea', 'Hesper', 'Iris', 'Juno', 'Kestrel', 'Lyra', 'Maia', 'Nerine', 'Orla', 'Pavo'];
-    function activeEdges() {
+        function activeEdges() {
       const out = [];
       SKY.edges.forEach((e, i) => { if (S.stars[e[0]] && S.stars[e[1]] && !D.dis[i]) out.push(i); });
       return out;
@@ -886,7 +901,8 @@
           seen.add(n.e); set.push(n.e); frontier.push(n.to, u);
         }
         const c0 = SKY.stars[SKY.edges[seed][0]][5];
-        ev = { kind: 'comet', name: 'Comet ' + COMET_NAMES[randInt(COMET_NAMES.length)], edges: set, center: SKY.edges[seed][0], total: CFG.cometSeconds, where: SKY.consts[c0].name };
+        const fresh = YearSky.COMETS.filter(c => !S.comets[c.id]), pool = fresh.length ? fresh : YearSky.COMETS, comet = pool[randInt(pool.length)];
+        ev = { kind: 'comet', comet: comet.id, name: 'Comet ' + comet.name, edges: set, center: SKY.edges[seed][0], total: CFG.cometSeconds, where: SKY.consts[c0].name };
       } else {
         const hubs = D.claimed.filter(i => adj[i].filter(n => S.stars[n.to] && !D.dis[n.e]).length >= 2);
         if (!hubs.length) return null;
@@ -924,6 +940,8 @@
         S.research += 4 * ev.edges.length * (ev.hint ? 0.25 : 1);
         S.stats.eventsDone++;
         log(ev.name + ' routes redrawn' + (perfect ? ' perfectly' : '') + ': +$' + fmt(ev.paid + bonus) + '.', 'event-done');
+        const comet = ev.kind === 'comet' && YearSky.COMET_BY_ID[ev.comet];
+        if (comet && !S.comets[comet.id]) { S.comets[comet.id] = { t: nowFn(), perfect }; log('Catalogued ' + comet.name + ' (' + comet.desig + '): ' + comet.note, 'sky'); }
         S.events = S.events.filter(x => x !== ev);
         S.eventTimer = rand(CFG.eventGap);
       }
@@ -984,6 +1002,7 @@
     // Advance the world by dt seconds. `active` = the player has the game open (events and petitions only run then).
     function tick(dt, active) {
       if (dt <= 0) return;
+      if (Math.floor(nowFn() / 3600e3) !== S.skyKey) { skyUpdate(); recalc(); } // a new hour: a shower may have begun, ended or reached its peak
       let left = dt;
       let guard = 0;
       while (left > 1e-9 && guard++ < 100000) {
@@ -1060,6 +1079,22 @@
       return out.sort((a, b) => (a.why === 'flagship' ? 0 : 1) - (b.why === 'flagship' ? 0 : 1) || b.cash - a.cash || a.star - b.star); // flagships first
     }
 
+    // ---- the year's sky: watching the meteor showers on the real calendar. Checked hourly (and when a save is loaded), while you play or when you return.
+    function skyUpdate() {
+      const now = nowFn();
+      S.skyKey = Math.floor(now / 3600e3);
+      let changed = false;
+      for (const x of YearSky.activeShowers(now)) {
+        const sh = x.shower;
+        if (!showerZone[sh.id].some(i => S.stars[i])) continue; // no colony under the radiant: nothing to see
+        let rec = S.showers[sh.id];
+        if (!rec) { rec = S.showers[sh.id] = { t: now, peak: 0 }; log('You watched the ' + sh.name + ' from the colonies under its radiant in ' + sh.con + '. A small permanent bonus.', 'sky'); changed = true; }
+        if (!rec.peak && Math.abs(x.daysToPeak) <= 1) { rec.peak = now; log('You caught the peak of the ' + sh.name + ': its bonus is doubled.', 'sky'); changed = true; }
+      }
+      return changed;
+    }
+    const showersNow = () => D.showers;
+
     // ---- Olympiad Academy: every topic's mastery (from the spaced-repetition cards) lifts a permanent level that unlocks a bonus
     function academy() {
       const store = S.quiz.astro, now = nowFn();
@@ -1127,7 +1162,7 @@
       routeLevel, routeUpgradeCost, canUpgradeRoute, upgradeRoute,
       spawnEvent, redraw, useHint, eventReward, dismissPetition, addPetition,
       consStatus, frontier, attention, expansionTargets, messierTargets, buildOptions, messierStats, lvl, fmt, sepDeg,
-      academy, academySync, academyLevels, Astro, now: () => nowFn(),
+      academy, academySync, academyLevels, Astro, YearSky, showerZone, showersNow, skyUpdate, now: () => nowFn(),
       rivals, rivalOf, starPrice, starRank, takeoverTargets, isLeadStar: i => !!isLead[i], RIVAL_COLORS,
       serialize() { S.saved = nowFn(); return JSON.stringify(S); },
     };

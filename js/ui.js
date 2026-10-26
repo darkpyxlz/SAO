@@ -8,9 +8,10 @@
   const AUTOSAVE = 'firmament.autosave.v1';
   const SLOT = n => 'firmament.slot' + n + '.v1';
 
-  const ui = { lastReady: 0, lastTech: null, sel: null, redraw: null, hint: false, flashes: [], frontier: new Set(), takeover: new Set(), borders: true, started: false, modal: null, tab: null, filter: {}, lastLog: 0, held: new Map(), fast: false };
+  const ui = { lastReady: 0, lastTech: null, sel: null, redraw: null, hint: false, flashes: [], frontier: new Set(), takeover: new Set(), borders: true, skyLayer: true, started: false, modal: null, tab: null, filter: {}, lastLog: 0, held: new Map(), fast: false };
   try { ui.borders = localStorage.getItem('firmament.borders') !== '0'; } catch (e) { /* no storage: borders stay on */ }
-  { const bb = document.querySelector('#borders-btn'); if (bb) bb.classList.toggle('off', !ui.borders); }
+  try { ui.skyLayer = localStorage.getItem('firmament.skylayer') !== '0'; } catch (e) { /* no storage: the layer stays on */ }
+  { const bb = document.querySelector('#borders-btn'); if (bb) bb.classList.toggle('off', !ui.borders); const sb = document.querySelector('#sky-btn'); if (sb) sb.classList.toggle('off', !ui.skyLayer); }
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = n => G.fmt(n);
   const money = n => '$' + fmt(n);
@@ -157,14 +158,14 @@
   // ---------------------------------------------------------------- map interaction
   function handleMapClick(x, y) {
     if (!ui.started) return;
-    const hit = sky.pick(x, y, matchMedia('(pointer:coarse)').matches);
+    const hit = sky.pick(x, y, matchMedia('(pointer:coarse)').matches, !!ui.redraw);
     if (ui.redraw) { redrawClick(hit); return; }
     if (!hit) { ui.sel = null; return; }
     ui.sel = hit;
   }
   function handleHover(x, y) {
     if (!ui.started || matchMedia('(pointer:coarse)').matches) return;
-    const hit = sky.pick(x, y, false);
+    const hit = sky.pick(x, y, false, !!ui.redraw);
     canvas.classList.toggle('pointing', !!hit);
     const tip = $('#tooltip');
     if (!hit) { tip.hidden = true; return; }
@@ -173,6 +174,9 @@
     if (hit.type === 'star') {
       const st = SKY.stars[hit.i];
       t = st[6] + ' · ' + SKY.consts[st[5]].id + ' · mag ' + st[3].toFixed(1) + (S.stars[hit.i] ? '' : ' · not colonised');
+    } else if (hit.type === 'shower') {
+      const sh = G.YearSky.SHOWERS[hit.i];
+      t = '☄ ' + sh.name + ' · radiant in ' + sh.con + ' · ' + showerWhen(sh);
     } else {
       const m = SKY.messier[hit.i];
       t = 'M' + m.n + (S.messier[hit.i] && m.alt ? ' · ' + m.alt : '') + ' · ' + m.tname;
@@ -361,6 +365,30 @@
     h += '<div class="p-sec"><h4>Routes</h4>' + routeRows(i) + '</div>';
     return h;
   }
+  // ---- the year's sky: meteor showers on the real calendar
+  const showerState = sh => G.YearSky.showerState(sh, G.now());
+  function showerWhen(sh) {
+    const st = showerState(sh);
+    if (st.active) return Math.abs(st.daysToPeak) < 0.75 ? 'at its peak' : st.daysToPeak > 0 ? 'peak in ' + dur(st.daysToPeak * 86400) : 'peak ' + dur(-st.daysToPeak * 86400) + ' ago';
+    const w = ((st.daysToStart % 365) + 365) % 365;
+    return 'starts in ' + dur(w * 86400);
+  }
+  function showerPanel(i) {
+    const S = G.state, sh = G.YearSky.SHOWERS[i], st = showerState(sh), now = G.showersNow().find(x => x.id === sh.id);
+    const zone = G.showerZone[sh.id], mine = zone.filter(j => S.stars[j]), rec = S.showers[sh.id];
+    let h = '<div class="p-head"><h3>' + esc(sh.name) + '</h3><button class="x" data-act="close-panel" aria-label="Close">✕</button></div>';
+    h += '<div class="p-sub">☄ Meteor shower · radiant in ' + esc(sh.con) + ' · ' + sh.zhr + ' an hour at best · ' + sh.speed + ' km/s</div>';
+    h += '<div class="p-sec"><h4>Right now</h4><div class="row"><span class="grow"><b>' + (st.active ? 'Running' : 'Not running') + '</b> · ' + esc(showerWhen(sh)) + '</span><span class="muted tiny">' + esc(sh.dates) + '</span></div>';
+    h += '<div class="bar cy"><i style="width:' + Math.round(st.activity * 100) + '%"></i></div>';
+    if (now && mine.length) h += '<div class="row tiny"><span class="gold">+' + Math.round(now.boost * 100) + '% revenue</span><span class="muted">at ' + plural(mine.length, 'colony', 'colonies') + ' within ' + G.YearSky.ZONE_DEG + '° of the radiant</span></div>';
+    else if (st.active) h += '<div class="muted tiny">No colony of yours is within ' + G.YearSky.ZONE_DEG + '° of the radiant. Colonise near ' + esc(sh.con) + ' to earn from it and to watch it.</div>';
+    else h += '<div class="muted tiny">Colonies within ' + G.YearSky.ZONE_DEG + '° of the radiant (you have ' + mine.length + ') earn up to +' + Math.round(G.YearSky.showerBoost(sh) * 100) + '% revenue at the peak.</div>';
+    h += '</div>';
+    h += '<div class="p-sec"><h4>Your watch</h4>' + (rec ? '<div class="row"><span class="grow">Watched ' + dstr(rec.t) + '</span><span class="badge ' + (rec.peak ? 'gold' : '') + '">' + (rec.peak ? 'peak caught: ×2' : 'peak not caught') + '</span></div>' : '<div class="muted tiny">Not watched yet. Open the game while it runs, with a colony under the radiant, to add a permanent +' + (G.CFG.showerWatch * 100).toFixed(1) + '% revenue (double if you catch the peak, ' + esc(sh.peakText) + ').</div>') + '</div>';
+    h += '<div class="p-sec"><h4>About</h4><div class="tiny">' + esc(sh.note) + '</div><div class="row tiny" style="margin-top:6px"><span class="muted">Parent</span><span class="grow"></span><span>' + esc(sh.parent) + ' · ' + sh.parentKind + '</span></div><div class="row tiny"><span class="muted">Peak</span><span class="grow"></span><span>' + esc(sh.peakText) + '</span></div></div>';
+    if (mine.length) h += '<div class="p-sec"><h4>Your colonies under the radiant</h4><div class="tiny">' + mine.slice(0, 12).map(j => '<span class="link" data-act="sel-star" data-i="' + j + '">' + esc(SKY.stars[j][6]) + '</span>').join(', ') + (mine.length > 12 ? ', …' : '') + '</div></div>';
+    return h;
+  }
   function messierPanel(m) {
     const S = G.state, M = SKY.messier[m], vis = S.messier[m], con = SKY.consts[M.c];
     let h = '<div class="p-head"><h3>M' + M.n + (vis && M.alt ? ' · ' + esc(M.alt) : '') + '</h3><button class="x" data-act="close-panel" aria-label="Close">✕</button></div>';
@@ -392,7 +420,7 @@
   function renderPanel() {
     const el = $('#panel');
     if (!ui.started || !ui.sel || ui.redraw) { el.hidden = true; document.body.classList.remove('has-panel'); lastPanelHtml = ''; return; }
-    const html = ui.sel.type === 'star' ? starPanel(ui.sel.i) : messierPanel(ui.sel.i);
+    const html = ui.sel.type === 'star' ? starPanel(ui.sel.i) : ui.sel.type === 'shower' ? showerPanel(ui.sel.i) : messierPanel(ui.sel.i);
     if (html !== lastPanelHtml) { el.innerHTML = html; lastPanelHtml = html; drawVisuals(el); }
     el.hidden = false; document.body.classList.add('has-panel');
     if (ui.sel.type === 'star' && G.state.stars[ui.sel.i]) { // live values
@@ -460,6 +488,7 @@
     else if (idle > 0) { const grab = [...ui.takeover].filter(t => G.canLaunchTo(t).ok); if (grab.length) chips.push('<span class="chip" data-act="goto-takeover">⚑ ' + plural(grab.length, 'rival star') + ' to take over' + kb('X') + '</span>'); }
     if (!S.tech.active && G.TECHS.some(t => G.techStatus(t.id) === 'available' && G.canStartTech(t.id).ok)) chips.push('<span class="chip cyan" data-act="open-corp-tech">⚗ lab idle: research available' + kb('T') + '</span>');
     if (S.market.kind) { const m = G.MARKETS[S.market.kind]; chips.push('<span class="chip" data-act="open-corp" title="' + esc(m.text) + '">◈ ' + esc(m.name) + ' · ' + dur(S.market.remaining) + '</span>'); }
+    for (const x of G.showersNow()) if (x.colonies && x.activity >= 0.4) { const i = G.YearSky.SHOWERS.findIndex(q => q.id === x.id); chips.push('<span class="chip" data-act="goto-shower" data-i="' + i + '" title="A meteor shower is running: colonies near its radiant earn more">☄ ' + esc(G.YearSky.SHOWERS[i].name) + ' +' + Math.round(x.boost * 100) + '% at ' + plural(x.colonies, 'colony', 'colonies') + '</span>'); }
     const ready = QU.readyCount();
     if (ready) chips.unshift('<span class="chip gold" data-act="open-quests">✔ ' + ready + ' quest' + (ready === 1 ? '' : 's') + ' ready' + kb('Q') + '</span>');
     const qb = $('#qbadge'); qb.hidden = !ready; qb.textContent = ready;
@@ -503,7 +532,7 @@
     fn(body);
     if (ui.modal.keepScroll || ui.modal.live) body.scrollTop = keep;
   }
-  const CODEX_TABS = [['const', 'Constellations'], ['messier', 'Messier'], ['stars', 'Named stars'], ['learning', 'Learning'], ['chron', 'Chronicle']];
+  const CODEX_TABS = [['const', 'Constellations'], ['messier', 'Messier'], ['stars', 'Named stars'], ['sky', 'Sky'], ['learning', 'Learning'], ['chron', 'Chronicle']];
   function openCodex(tab) { openModal({ id: 'codex', title: 'Codex', tabs: CODEX_TABS, tab: tab || 'const' }); }
 
   function consBadge(cs) {
@@ -560,6 +589,36 @@
         h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(2) + '</td><td>' + (cl ? '<span class="badge green">colonised</span>' : G.rivalOf(i) >= 0 ? '<span class="badge" style="color:' + S.rivals[G.rivalOf(i)].color + '">' + esc(S.rivals[G.rivalOf(i)].name) + '</span>' : '<span class="badge">free · ' + money(G.starPrice(i)) + '</span>') + '</td><td>' + learnBadge('star', i) + '</td></tr>';
       }
       body.innerHTML = h + '</table>';
+    },
+    sky(body) {
+      const S = G.state, Y = G.YearSky, now = G.now(), act = G.showersNow().slice().sort((a, b) => b.activity - a.activity);
+      const nSh = Object.keys(S.showers).length, nPk = Object.values(S.showers).filter(r => r.peak).length, nCm = Object.keys(S.comets).length;
+      let h = '<p class="muted" style="margin-top:0;max-width:720px">The sky has a calendar. The <b>ecliptic</b> is the Sun’s road through the stars, and the zodiac band along it holds the Moon and planets. <b>Meteor showers</b> come when the Earth ploughs through the trail of a comet, on the same dates every year, from a point in the sky called the radiant. <b>Comets</b> cut your routes when they pass: redraw them to add the comet to this catalogue. Press <b>Y</b> to show or hide the ecliptic and the radiants on the map.</p>';
+      h += '<div class="stat-grid"><div class="stat"><b>' + nSh + ' / ' + Y.SHOWERS.length + '</b><span>meteor showers watched (+' + (G.CFG.showerWatch * 100).toFixed(1) + '% revenue each)</span></div><div class="stat"><b class="gold">' + nPk + ' / ' + Y.SHOWERS.length + '</b><span>peaks caught (the bonus doubles)</span></div><div class="stat"><b class="cyan">' + nCm + ' / ' + Y.COMETS.length + '</b><span>comets catalogued (+' + (G.CFG.cometLore * 100).toFixed(0) + '% event rewards each)</span></div></div>';
+      h += '<h3>Meteor showers <span class="muted tiny">today is ' + new Date(now).toLocaleDateString(undefined, { day: 'numeric', month: 'long', timeZone: 'UTC' }) + ' (UTC)</span></h3>';
+      if (act.length) {
+        h += '<div class="empires">';
+        for (const x of act) {
+          const i = Y.SHOWERS.findIndex(q => q.id === x.id), sh = Y.SHOWERS[i];
+          h += '<div class="erow click" data-act="goto-shower" data-i="' + i + '"><span class="dot" style="background:#bfe4ff"></span><span><b>' + esc(sh.name) + '</b> <span class="muted tiny">' + esc(showerWhen(sh)) + ' · radiant in ' + esc(sh.con) + '</span> ' + (x.colonies ? '<span class="badge gold">+' + Math.round(x.boost * 100) + '% at ' + plural(x.colonies, 'colony', 'colonies') + '</span>' : '<span class="badge">no colony under it</span>') + '</span><span class="muted tiny">' + Math.round(x.activity * 100) + '%</span><span class="ebar"><i style="width:' + Math.round(x.activity * 100) + '%;background:#bfe4ff"></i></span></div>';
+        }
+        h += '</div>';
+      } else h += '<div class="muted" style="margin-bottom:8px">No shower is running today.</div>';
+      const soon = Y.upcoming(now, 5).filter(x => !x.active).slice(0, 3);
+      if (soon.length) h += '<div class="muted tiny" style="margin-bottom:8px">Next: ' + soon.map(x => esc(x.shower.name) + ' in ' + dur(x.wait * 86400)).join(' · ') + '.</div>';
+      h += '<div class="table-wrap"><table class="t"><tr><th>Shower</th><th>Radiant</th><th>Active</th><th>Peak</th><th>ZHR</th><th>Parent</th><th>You</th></tr>';
+      Y.SHOWERS.forEach((sh, i) => {
+        const rec = S.showers[sh.id], st = showerState(sh);
+        h += '<tr class="click" data-act="goto-shower" data-i="' + i + '"><td>' + (st.active ? '<span class="dot" style="background:#bfe4ff"></span>' : '') + esc(sh.name) + '</td><td class="muted">' + esc(sh.con) + '</td><td class="muted">' + esc(sh.dates) + '</td><td>' + esc(sh.peakText) + '</td><td>' + sh.zhr + '</td><td class="muted">' + esc(sh.parent) + '</td><td>' + (rec ? '<span class="badge ' + (rec.peak ? 'gold' : 'cyan') + '">' + (rec.peak ? '★ peak' : 'watched') + '</span>' : '<span class="muted">·</span>') + '</td></tr>';
+      });
+      h += '</table></div><div class="muted tiny">ZHR is the zenithal hourly rate: the meteors an observer would count in an hour under a perfect, dark sky with the radiant overhead. Colonies within ' + Y.ZONE_DEG + '° of a running radiant earn up to +' + Math.round(Y.showerBoost(Y.SHOWER_BY_ID.gem) * 100) + '% revenue at its peak (the weakest showers a third of that).</div>';
+      h += '<h3>Comets <span class="muted tiny">' + nCm + ' of ' + Y.COMETS.length + ' catalogued</span></h3><div class="cometgrid">';
+      for (const c of Y.COMETS) {
+        const rec = S.comets[c.id];
+        h += '<div class="cometcard' + (rec ? ' seen' : '') + '"><div class="row"><b class="grow">' + (rec ? '☄ ' : '') + esc(c.name) + '</b><span class="muted tiny">' + esc(c.desig) + '</span></div><div class="tiny muted">' + esc(c.period) + (c.perihelion ? ' · ' + esc(c.perihelion) : '') + '</div>' + (rec ? '<div class="tiny" style="margin-top:4px">' + esc(c.note) + '</div><div class="tiny muted" style="margin-top:3px">Catalogued ' + dstr(rec.t) + (rec.perfect ? ' · perfect redraw' : '') + '</div>' : '<div class="tiny muted" style="margin-top:4px">Redraw the routes it cuts to learn its story.</div>') + '</div>';
+      }
+      h += '</div><h3>The ecliptic</h3><div class="tiny" style="max-width:720px">The ecliptic (the gold line, with the zodiac band 8° either side) is the path the Sun seems to follow through the stars in a year: the plane of Earth’s orbit seen from the Earth. It is tilted ' + Y.EPS.toFixed(1) + '° to the celestial equator, so it crosses the equator at the two <b>equinoxes</b> and reaches its farthest north and south at the <b>solstices</b>. The ticks mark where the Sun is at the start of each tropical sign, with its usual date. Because the Earth’s axis wobbles over 26 000 years (precession), the March equinox, the “First Point of Aries”, has drifted into Pisces. The ecliptic runs through thirteen constellations, including Ophiuchus, and the Moon and planets always stay close to it.</div>';
+      body.innerHTML = h;
     },
     learning(body) {
       const cats = [['const', 'Constellations'], ['star', 'Named stars'], ['messier', 'Messier objects'], ['astro', 'Olympiad Academy']];
@@ -964,13 +1023,14 @@
         '<li><b>Trade routes</b>: neighbouring colonies boost each other, more when their star colours differ. Upgrade routes for stronger bonuses and faster ships. The map wraps in both directions: leave over the north pole and you arrive from the south.</li>' +
         '<li><b>Flagships</b>: the 20 named stars are sector offices. Colonies around one remit 25% of their revenue to it, its vault holds a day, it <b>never banks itself</b> and collecting there pays a dividend premium. Research the <b>Telegraph</b>, <b>Electronic Funds Transfer</b> and <b>Digital Payments</b> and ordinary colonies bank up to 80% of their cash automatically; the flagships still need you, at every stage of the game.</li></ul>' +
         '<h3>Technology and buildings</h3><p>Open <b>Corporation → Technology</b> to research human technology in real time: the telescope, rockets, computers, solar cells, space stations, fusion, space elevators, Dyson swarms and warp drives. Technology unlocks <b>buildings</b> and gives company-wide bonuses. Every three development levels on a colony open a building slot (the rings around the star; each building shows as a little satellite). Revenue buildings such as Solar Farms and Fusion Plants cost what they earn back in a day or two; a <b>Clearing House</b> banks the revenue of a whole region automatically; a <b>Space Station</b> adds slots.</p>' +
+        '<h3>The ecliptic, meteor showers and comets</h3><p>Press <b>Y</b> (or the ☄ button) to show the <b>ecliptic</b>: the Sun’s road through the stars, with its zodiac band, a tick for each sign with the date the Sun gets there, the equinoxes, the solstices and the ecliptic poles. <b>Meteor showers</b> run on the real calendar: while one is on, its <b>radiant</b> glows on the map with meteors streaking out of it, and colonies within 25° of it earn more, most at the peak. Open the game during a shower with a colony under its radiant to <b>watch</b> it, for a small permanent bonus (double for the peak). Every <b>comet</b> that cuts your routes is a real one and is drawn with its tail pointing away from the Sun; redraw its routes to catalogue it in <b>Codex → Sky</b>.</p>' +
         '<h3>Rivals and borders</h3><p>Three rival companies start on far-away flagships and expand at about your own pace: every star you add earns each of them a share of one (90%, 75% and 60%). They never attack you or take what is yours. The map tints each empire’s ground and draws its <b>borders</b>; press <b>V</b> to hide them. A star a rival holds can be <b>taken over</b> once it touches your territory (ringed with a turning dashed circle; <b>X</b> finds them): it costs 2.5 times its normal price, so flagships and lead stars are dear. When the free sky runs out, the rest of the sky is won by takeover, and a rival that loses its last star is acquired.</p>' +
         '<h3>The company</h3><p>As you grow you are promoted from Startup to Cosmic Monopoly. Your share price follows the company’s worth, and random <b>market conditions</b> (booms, tech bubbles, credit crunches, government contracts) come and go while you play.</p>' +
         '<h3>Messier objects</h3><p>Send a <b>survey mission</b> to a Messier object near one of your colonies. Each type gives a bonus (globulars: fleet slots, open clusters: revenue, nebulae: research, galaxies: speed) and is stamped into the catalogue with its photograph.</p>' +
         '<h3>Constellations</h3><p>A <b>developed</b> constellation (every star colonised, 3+ levels each) is stamped in the Codex and unlocks one-tap collection there. <b>Mastered</b> at 9+ levels each.</p>' +
         '<h3>Sky School</h3><p>Five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, identify Messier objects by photograph, number, name and type, and cover the Olympiad Academy. Rewards are modest. Everything runs on spaced repetition: an item needs 10 correct answers, spaced further and further apart, before it is <b>learned</b>. Track it all under <b>Codex → Learning</b>.</p>' +
         '<h3>Olympiad Academy</h3><p>The astronomy-olympiad syllabus in ten topics (sky and time, orbital mechanics, telescopes and optics, light, stars, magnitudes and distances, stellar evolution, the Solar System and exoplanets, galaxies and cosmology): facts, <b>diagrams</b> of telescope designs, orbits and the H–R diagram, and numerical problems with fresh numbers every time. Practise in Sky School; open <b>Corporation → Academy</b> for each topic’s level, formula sheet and diagrams. Mastering a topic raises it through three levels, and every level is a <b>permanent</b> bonus for the whole company.</p>' +
-        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a <b>story</b> of more than 340 goals in sixteen chapters. The list offers the next goal of every chapter; tap a chapter to see all that is left in it. Rewards are worth minutes of your revenue.</p>' +
+        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a <b>story</b> of more than 380 goals in seventeen chapters. The list offers the next goal of every chapter; tap a chapter to see all that is left in it. Rewards are worth minutes of your revenue.</p>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
         '<h3>Petitions</h3><p>Colonies sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. Nothing in this game dims, decays or is taken from you.</p>' +
         '<h3 class="k-only">Keyboard</h3><p class="k-only">Every window and most actions have a key, shown on the buttons. <b>Space</b> expands (sends a colony ship or survey mission), <b>C</b> opens the Codex, <b>1–9</b> build in the selected colony and <b>R</b> collects. Press <b>?</b> for the full list (Menu → Keys).</p></div>';
@@ -1006,6 +1066,8 @@
     'quest-claim': el => { const r = QU.claim(el.dataset.id); toast(r.ok ? 'Quest reward: +' + money(r.reward.cash) + '  +' + rp(r.reward.research) : r.msg, r.ok ? 'gold' : 'bad'); },
     'quest-reroll': el => { QU.rerollContract(el.dataset.id); },
     'goto-takeover': () => { const cand = G.takeoverTargets().filter(t => G.canLaunchTo(t).ok); if (cand.length) focusStar(cand[0]); },
+    'toggle-sky': () => { ui.skyLayer = !ui.skyLayer; try { localStorage.setItem('firmament.skylayer', ui.skyLayer ? '1' : '0'); } catch (e) { /* private window */ } const b = $('#sky-btn'); if (b) b.classList.toggle('off', !ui.skyLayer); toast(ui.skyLayer ? 'Ecliptic and meteor shower radiants shown.' : 'Ecliptic and meteor shower radiants hidden.', 'good'); },
+    'goto-shower': el => { const i = +el.dataset.i; closeModal(); ui.sel = { type: 'shower', i }; sky.goShower(i); if (!ui.skyLayer) runAct('toggle-sky'); },
     'toggle-borders': () => { ui.borders = !ui.borders; try { localStorage.setItem('firmament.borders', ui.borders ? '1' : '0'); } catch (e) { /* private window */ } const b = $('#borders-btn'); if (b) b.classList.toggle('off', !ui.borders); toast(ui.borders ? 'Empire borders shown.' : 'Empire borders hidden.', 'good'); },
     'quest-chapter': el => { ui.questChapter = el.dataset.chapter || null; },
     'quest-claim-all': () => {
@@ -1052,7 +1114,7 @@
     'reset': () => { if (confirm('Wind up this company and start again? Export first if you want a backup.')) { ui.started = false; /* stops the unload autosave from writing the old game back */ try { localStorage.removeItem(AUTOSAVE); } catch (e) { } closeModal(); location.reload(); } },
   };
   // after these actions the modal swaps itself, so it must not be re-rendered again by the click handler
-  const NO_RERENDER = ['open-academy', 'academy-practise', 'open-const', 'tab', 'filter', 'goto-star', 'goto-messier', 'goto-const', 'close-modal', 'open-codex', 'open-menu', 'open-corp', 'open-corp-tech', 'open-learning', 'open-school', 'open-quests', 'open-fleets', 'school-review', 'slot-load', 'reset'];
+  const NO_RERENDER = ['open-academy', 'academy-practise', 'open-const', 'tab', 'filter', 'goto-star', 'goto-messier', 'goto-const', 'goto-shower', 'close-modal', 'open-codex', 'open-menu', 'open-corp', 'open-corp-tech', 'open-learning', 'open-school', 'open-quests', 'open-fleets', 'school-review', 'slot-load', 'reset'];
   function afterAct(name) {
     if (!ui.started) return;
     scheduleSave(); renderHud(); renderPanel();
@@ -1107,11 +1169,12 @@
       [['←', '↑', '↓', '→'], 'Pan (hold Shift to go faster)'],
       [['+', '−'], 'Zoom'],
       [['V'], 'Show or hide empire borders (yours and the rivals’)'],
+      [['Y'], 'Show or hide the ecliptic and the radiants of meteor showers'],
       [['E'], 'Redraw the routes cut by a comet or nova (press again, or Esc, to finish)'],
     ]],
     ['Inside windows', [
       [['←', '→'], 'Switch tabs'],
-      [['1', '…', '5'], 'Codex and Menu: jump to a tab'],
+      [['1', '…', '6'], 'Codex and Menu: jump to a tab'],
       [['1', '…', '9'], 'Corporation → Technology: start the numbered project'],
       [['1', '…', '9', '0'], 'Corporation → Academy: practise the numbered topic (Space: everything, R: what is due, ⌫ leaves a study page, P practises it)'],
       [['R'], 'Codex → Learning, and the Sky School menu: review what is due'],
@@ -1276,6 +1339,7 @@
       case 'n': { const t = cycleList(G.expansionTargets(), sel && sel.type === 'star' ? sel.i : -1, shift ? -1 : 1); if (t < 0) toast('No new star to colonise: every free star in reach has a ship bound for it' + (ui.takeover.size ? '. Rival stars next to you can be taken over (X).' : '.'), 'bad'); else focusStar(t); return true; }
       case 'x': { const t = cycleList(G.takeoverTargets(), sel && sel.type === 'star' ? sel.i : -1, shift ? -1 : 1); if (t < 0) toast('No rival holds a star next to your territory yet.', 'bad'); else focusStar(t); return true; }
       case 'v': runAct('toggle-borders'); return true;
+      case 'y': runAct('toggle-sky'); return true;
       case 'm': { const m = cycleList(G.messierTargets(), sel && sel.type === 'messier' ? sel.i : -1, shift ? -1 : 1); if (m < 0) toast('No Messier object is in reach: colonise a star near one first.', 'bad'); else focusMessier(m); return true; }
       case 'g': { const t = cycleList(G.attention().map(a => a.star), colony, shift ? -1 : 1); if (t < 0) toast('No colony has full storage right now.', 'bad'); else focusStar(t); return true; }
       case 'p': { const t = cycleList(S.petitions.map(p => p.star), colony, shift ? -1 : 1); if (t < 0) toast('No colony has a petition right now.', 'bad'); else focusStar(t); return true; }
@@ -1330,7 +1394,7 @@
     const L = G.state.log;
     for (let k = Math.max(ui.lastLog, L.length - 4); k < L.length; k++) {
       const l = L[k];
-      if (['claim', 'messier', 'dev', 'event', 'petition', 'event-done', 'tech', 'rank', 'market', 'rival'].includes(l.kind) && k > 0) toast(l.text, l.kind === 'event' ? 'bad' : 'gold');
+      if (['claim', 'messier', 'dev', 'event', 'petition', 'event-done', 'tech', 'rank', 'market', 'rival', 'sky'].includes(l.kind) && k > 0) toast(l.text, l.kind === 'event' ? 'bad' : 'gold');
     }
     if (L.length !== ui.lastLog) scheduleSave();
     ui.lastLog = L.length;
@@ -1360,7 +1424,7 @@
         if (ui.modal && ((ui.modal.live && !(ui.modal.id === 'corp' && ui.tab === 'academy')) || (ui.modal.tabs && ui.tab === 'chron')) && !typing && !$('#modal-body :active')) renderModal();
       }
       pumpLog();
-    } else sky.render(now, { sel: null, redraw: null, flashes: [], frontier: new Set(), takeover: new Set(), borders: true, hint: false, _idle: true });
+    } else sky.render(now, { sel: null, redraw: null, flashes: [], frontier: new Set(), takeover: new Set(), borders: true, skyLayer: true, hint: false, _idle: true });
     requestAnimationFrame(frame);
   }
   // where a selected star should land on screen so the side panel (desktop) or bottom sheet (phone) does not cover it

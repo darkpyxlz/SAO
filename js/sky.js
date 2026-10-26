@@ -9,8 +9,7 @@
   const millerY = decDeg => 1.25 * Math.log(Math.tan(PI / 4 + 0.4 * decDeg * RAD));
   const YMAX = millerY(90), YP = 2 * YMAX; // the map is YP tall; its top edge (north pole) joins its bottom edge (south pole)
   const wrapY = d => d - YP * Math.floor((d + YP / 2) / YP); // -> [-YP/2, YP/2)
-  const OBLIQUITY = 23.4393 * RAD;
-
+  
   // approximate star colour from B-V
   const STOPS = [[-0.3, 155, 176, 255], [0, 170, 191, 255], [0.3, 202, 216, 255], [0.6, 255, 244, 234], [0.8, 255, 228, 186], [1.2, 255, 200, 125], [1.8, 255, 160, 100]];
   function bvRGB(bv) {
@@ -48,8 +47,11 @@
     const F = SKY.field, NF = F.length / 3;
     const fra = new Float32Array(NF), fY = new Float32Array(NF), fm = new Float32Array(NF);
     for (let i = 0; i < NF; i++) { fra[i] = F[3 * i] / 100 * RAD; fY[i] = millerY(F[3 * i + 1] / 100); fm[i] = F[3 * i + 2] / 10; }
-    const eclip = [];
-    for (let l = 0; l <= 360; l += 4) { const lr = l * RAD; eclip.push([Math.atan2(Math.cos(OBLIQUITY) * Math.sin(lr), Math.cos(lr)), millerY(Math.asin(Math.sin(OBLIQUITY) * Math.sin(lr)) / RAD)]); }
+    // the ecliptic and the zodiac band (8 degrees either side), as points every 3 degrees of ecliptic longitude: [right ascension in radians, Miller y]
+    const Y_ = typeof YearSky !== 'undefined' ? YearSky : null;
+    const ECL = Y_ ? [-8, 0, 8].map(beta => { const pts = []; for (let l = 0; l <= 360; l += 3) { const [ra, dec] = Y_.eclToEq(l, beta); pts.push([ra * RAD, millerY(dec)]); } return pts; }) : [[], [], []];
+    const SH = Y_ ? Y_.SHOWERS : [], shra = SH.map(x => x.ra * RAD), shY = SH.map(x => millerY(x.dec));
+    const shx = new Float32Array(SH.length), shy = new Float32Array(SH.length), shvis = new Uint8Array(SH.length);
 
     const sx = new Float32Array(N), sy = new Float32Array(N), svis = new Uint8Array(N);
     const mx = new Float32Array(NM), my = new Float32Array(NM), mvis = new Uint8Array(NM);
@@ -133,7 +135,7 @@
     canvas.addEventListener('wheel', e => { e.preventDefault(); zoomAt(Math.exp(-e.deltaY * 0.0016), e.clientX, e.clientY); }, { passive: false });
 
     // ---- picking
-    function pick(px, py, touch) {
+    function pick(px, py, touch, starsOnly) {
       const R = touch ? 24 : 15;
       let best = null, bd = R * R;
       for (let i = 0; i < N; i++) {
@@ -141,10 +143,15 @@
         const d = (sx[i] - px) ** 2 + (sy[i] - py) ** 2;
         if (d < bd) { bd = d; best = { type: 'star', i }; }
       }
-      for (let i = 0; i < NM; i++) {
+      for (let i = 0; i < NM && !starsOnly; i++) {
         if (!mvis[i]) continue;
         const d = (mx[i] - px) ** 2 + (my[i] - py) ** 2;
         if (d < bd * 0.9) { bd = d; best = { type: 'messier', i }; }
+      }
+      for (let i = 0; i < SH.length && !starsOnly; i++) { // an active (or coming) meteor shower's radiant
+        if (!shvis[i]) continue;
+        const d = (shx[i] - px) ** 2 + (shy[i] - py) ** 2;
+        if (d < bd * 0.8) { bd = d; best = { type: 'shower', i }; }
       }
       return best;
     }
@@ -202,23 +209,6 @@
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
         ctx.fillStyle = 'rgba(150,170,230,.38)'; ctx.fillText((d > 0 ? '+' : '') + d + '°', 4, y - 3);
       }
-      // ecliptic
-      ctx.setLineDash([3, 6]); ctx.strokeStyle = 'rgba(255,217,138,.16)'; ctx.beginPath();
-      let prevR = null, x = 0;
-      for (const [r, Y] of eclip) {
-        if (prevR === null) x = px(r); else x -= wrap(r - prevR) * scale;
-        const y = py(Y);
-        if (prevR === null) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        prevR = r;
-      }
-      ctx.stroke();
-      // the same curve shifted one world to either side so the seam never shows a gap
-      for (const k of [-1, 1]) {
-        ctx.beginPath(); prevR = null;
-        for (const [r, Y] of eclip) { if (prevR === null) x = px(r) + k * TAU * scale; else x -= wrap(r - prevR) * scale; const y = py(Y); if (prevR === null) ctx.moveTo(x, y); else ctx.lineTo(x, y); prevR = r; }
-        ctx.stroke();
-      }
-      ctx.setLineDash([]);
       // the seam where the north pole meets the south pole
       const ys = py(YMAX);
       if (ys > -2 && ys < H + 2) {
@@ -227,6 +217,135 @@
         ctx.fillStyle = 'rgba(150,170,230,.5)';
         if (ys > 12) ctx.fillText('north celestial pole ↑', 4, ys - 4);
         if (ys < H - 12) ctx.fillText('south celestial pole ↓', 4, ys + 12);
+      }
+    }
+
+    // ---- the year's sky
+    const hash = (a, b) => { const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return x - Math.floor(x); };
+    // screen x of a run of ecliptic points, following the curve across the wrap (and shifted a whole sky left or right)
+    function eclXY(pts, k) {
+      const xs = [], ys = [];
+      let x = px(pts[0][0]) + k * TAU * scale, prev = pts[0][0];
+      for (let n = 0; n < pts.length; n++) { if (n) x -= wrap(pts[n][0] - prev) * scale; prev = pts[n][0]; xs.push(x); ys.push(py(pts[n][1])); }
+      return [xs, ys];
+    }
+    function drawEcliptic() {
+      const mid = [], N0 = ECL[1].length;
+      for (let k = -1; k <= 1; k++) {
+        const [xn, yn] = eclXY(ECL[2], k), [xs, ys] = eclXY(ECL[0], k), [x0, y0] = eclXY(ECL[1], k);
+        if (Math.max(...x0) < -40 || Math.min(...x0) > W + 40) continue;
+        ctx.beginPath(); // the zodiac band
+        for (let n = 0; n < xn.length; n++) n ? ctx.lineTo(xn[n], yn[n]) : ctx.moveTo(xn[n], yn[n]);
+        for (let n = xs.length - 1; n >= 0; n--) ctx.lineTo(xs[n], ys[n]);
+        ctx.closePath(); ctx.fillStyle = 'rgba(255,217,138,.04)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(255,217,138,.12)'; ctx.lineWidth = 1; ctx.setLineDash([2, 5]);
+        ctx.beginPath(); for (let n = 0; n < xn.length; n++) n ? ctx.lineTo(xn[n], yn[n]) : ctx.moveTo(xn[n], yn[n]); ctx.stroke();
+        ctx.beginPath(); for (let n = 0; n < xs.length; n++) n ? ctx.lineTo(xs[n], ys[n]) : ctx.moveTo(xs[n], ys[n]); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(255,217,138,.5)'; ctx.lineWidth = 1.5; // the ecliptic itself
+        ctx.beginPath(); for (let n = 0; n < x0.length; n++) n ? ctx.lineTo(x0[n], y0[n]) : ctx.moveTo(x0[n], y0[n]); ctx.stroke();
+        mid.push([x0, y0]);
+      }
+      // a tick and a label at the start of each sign: the Sun's longitude and the date it gets there
+      const signs = Y_.SIGNS, zoom = v.zoom;
+      for (const [x0, y0] of mid) for (const sg of signs) {
+        const n = sg.lon / 3, x = x0[n], y = y0[n];
+        if (x < -30 || x > W + 30 || y < -20 || y > H + 20) continue;
+        const a = Math.atan2(y0[Math.min(N0 - 1, n + 1)] - y0[Math.max(0, n - 1)], x0[Math.min(N0 - 1, n + 1)] - x0[Math.max(0, n - 1)]), nx = -Math.sin(a), ny = Math.cos(a);
+        ctx.strokeStyle = 'rgba(255,217,138,.6)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x - nx * 6, y - ny * 6); ctx.lineTo(x + nx * 6, y + ny * 6); ctx.stroke();
+        if (zoom > 0.45) text(sg.glyph + (zoom > 0.9 ? ' ' + sg.date : ''), x + 3, y - 10 * Math.sign(ny || 1) - 1, 11, 'rgba(255,217,138,.78)', 'left', '500');
+      }
+      // the turning points of the Sun's year, and the poles of the ecliptic
+      for (const pt of Y_.ECLIPTIC_POINTS) {
+        const [ra, dec] = Y_.eclToEq(pt.lon, pt.lat), X = px(ra * RAD), Yp = py(millerY(dec));
+        if (X < -30 || X > W + 30 || Yp < -20 || Yp > H + 20) continue;
+        const pole = Math.abs(pt.lat) === 90;
+        ctx.strokeStyle = 'rgba(255,217,138,.9)'; ctx.lineWidth = 1.4; ctx.beginPath();
+        if (pole) { ctx.arc(X, Yp, 5, 0, TAU); ctx.moveTo(X - 8, Yp); ctx.lineTo(X + 8, Yp); ctx.moveTo(X, Yp - 8); ctx.lineTo(X, Yp + 8); }
+        else { ctx.moveTo(X, Yp - 7); ctx.lineTo(X + 7, Yp); ctx.lineTo(X, Yp + 7); ctx.lineTo(X - 7, Yp); ctx.closePath(); }
+        ctx.stroke();
+        if (zoom > 0.8) text(pt.name + (pt.date ? ' · ' + pt.date : ''), X + 11, Yp + 4, 11, 'rgba(255,217,138,.85)', 'left', '600');
+      }
+      if (zoom > 0.7) for (const [x0, y0] of mid) { const n = 105, x = x0[n], y = y0[n]; if (x > 40 && x < W - 120 && y > 30 && y < H - 30) text('ECLIPTIC', x, y - 22, 11, 'rgba(255,217,138,.6)', 'center', '600'); }
+    }
+    // a meteor shower's radiant: bright while the shower runs (with meteors streaking out of it), dim in the weeks before
+    function drawShowers(t, ui, S) {
+      const now = G.now(), act = new Map(G.showersNow().map(x => [x.id, x])), up = new Map(Y_.upcoming(now, 13).map(x => [x.shower.id, x]));
+      const zf = Math.min(2.4, 0.7 + 0.35 * Math.pow(v.zoom, 0.6)), ts = t / 1000;
+      for (let i = 0; i < SH.length; i++) {
+        shx[i] = px(shra[i]); shy[i] = py(shY[i]);
+        const sh = SH[i], a = act.get(sh.id), u = up.get(sh.id);
+        const on = !!a, soon = !on && u && u.wait <= 30;
+        shvis[i] = (on || soon) && shx[i] > -40 && shx[i] < W + 40 && shy[i] > -40 && shy[i] < H + 40 ? 1 : 0;
+        if (!shvis[i]) continue;
+        const X = shx[i], Yp = shy[i], lv = on ? 0.4 + 0.6 * a.activity : 0.35;
+        ctx.strokeStyle = 'rgba(190,226,255,' + lv.toFixed(2) + ')'; ctx.lineWidth = on ? 1.4 : 1;
+        const R1 = (on ? 10 : 6) * (0.8 + 0.2 * zf);
+        ctx.beginPath();
+        for (let k = 0; k < 8; k++) { const ang = k * Math.PI / 4 + 0.2, r = k % 2 ? R1 * 0.55 : R1; ctx.moveTo(X + Math.cos(ang) * 2.5, Yp + Math.sin(ang) * 2.5); ctx.lineTo(X + Math.cos(ang) * r, Yp + Math.sin(ang) * r); }
+        ctx.stroke();
+        if (on) {
+          const g = ctx.createRadialGradient(X, Yp, 0, X, Yp, 26 * zf); g.addColorStop(0, 'rgba(190,226,255,' + (0.28 * a.activity + 0.06).toFixed(2) + ')'); g.addColorStop(1, 'rgba(190,226,255,0)');
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Yp, 26 * zf, 0, TAU); ctx.fill();
+          const n = Math.ceil(2 + 10 * a.activity);
+          for (let m = 0; m < n; m++) { // a meteor lives about a third of its period, flying out of the radiant
+            const period = 1.1 + 1.6 * hash(m, 1), off = hash(m, 2) * period, cyc = Math.floor((ts + off) / period), ph = ((ts + off) % period) / period;
+            if (ph > 0.3) continue;
+            const ang = hash(m + cyc * 0.37, 3) * TAU, d0 = (14 + 80 * hash(m + cyc, 4)) * zf, head = d0 + ph / 0.3 * (26 + 36 * hash(m, 5)) * zf, len = (9 + 16 * hash(m, 6)) * zf, al = (1 - ph / 0.3) * 0.9;
+            const x1 = X + Math.cos(ang) * head, y1 = Yp + Math.sin(ang) * head, x0 = X + Math.cos(ang) * (head - len), y0 = Yp + Math.sin(ang) * (head - len);
+            const gr = ctx.createLinearGradient(x0, y0, x1, y1); gr.addColorStop(0, 'rgba(235,245,255,0)'); gr.addColorStop(1, 'rgba(245,250,255,' + al.toFixed(2) + ')');
+            ctx.strokeStyle = gr; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+          }
+        }
+        const hot = ui.sel && ui.sel.type === 'shower' && ui.sel.i === i;
+        if (hot) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(X, Yp, 17, 0, TAU); ctx.stroke(); ctx.setLineDash([]); }
+        if (v.zoom > 0.55 || hot) {
+          const when = on ? (Math.abs(a.daysToPeak) < 0.75 ? 'at its peak' : a.daysToPeak > 0 ? 'peak in ' + Math.round(a.daysToPeak) + ' d' : 'peak ' + Math.round(-a.daysToPeak) + ' d ago') : 'in ' + Math.round(u.wait) + ' d';
+          text(sh.name + ' · ' + when, X + 13, Yp + 4, 11, on ? 'rgba(205,232,255,.95)' : 'rgba(170,200,235,.6)', 'left', on ? '600' : '');
+        }
+      }
+    }
+    // the position of a point offset from a sky position by `deg` degrees in the direction away from the Sun, on screen
+    function awayFromSun(ra, dec, deg, sun) {
+      const c = [Math.cos(dec) * Math.cos(ra), Math.cos(dec) * Math.sin(ra), Math.sin(dec)], s = [Math.cos(sun[1]) * Math.cos(sun[0]), Math.cos(sun[1]) * Math.sin(sun[0]), Math.sin(sun[1])];
+      const d = c[0] * s[0] + c[1] * s[1] + c[2] * s[2];
+      let u = [s[0] - d * c[0], s[1] - d * c[1], s[2] - d * c[2]];
+      const n = Math.hypot(u[0], u[1], u[2]);
+      if (n < 1e-6) return [px(ra), py(millerY(dec / RAD)) - 1]; // the Sun is on the comet: any way will do
+      u = [-u[0] / n, -u[1] / n, -u[2] / n];
+      const a = deg * RAD, p = [c[0] * Math.cos(a) + u[0] * Math.sin(a), c[1] * Math.cos(a) + u[1] * Math.sin(a), c[2] * Math.cos(a) + u[2] * Math.sin(a)];
+      return [px(Math.atan2(p[1], p[0])), py(millerY(Math.asin(Math.max(-1, Math.min(1, p[2]))) / RAD))];
+    }
+    // a comet or nova while it cuts the routes: the comet drifts across the sky near its star with its ion tail straight away from the Sun and a dust
+    // tail curving behind; a nova flares at its star
+    function drawEventBodies(t, S) {
+      const sun = Y_ ? Y_.sunEq(G.now()).map(x => x * RAD) : [0, 0], zf = Math.min(2.2, 0.75 + 0.3 * Math.pow(v.zoom, 0.5));
+      for (const ev of S.events) {
+        const c = ev.center;
+        if (!svis[c]) continue;
+        const u = Math.max(0, Math.min(1, 1 - ev.remaining / ev.total));
+        if (ev.kind === 'nova') {
+          const X = sx[c], Yp = sy[c], ph = (t / 1400) % 1;
+          for (let k = 0; k < 3; k++) { const q = (ph + k / 3) % 1; ctx.strokeStyle = 'rgba(255,236,190,' + (0.6 * (1 - q)).toFixed(2) + ')'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(X, Yp, (8 + 40 * q) * zf, 0, TAU); ctx.stroke(); }
+          const pulse = 0.75 + 0.25 * Math.sin(t / 160), q = 18 * zf * pulse, kk = q * 0.16;
+          ctx.fillStyle = 'rgba(255,248,225,.95)'; ctx.beginPath();
+          ctx.moveTo(X, Yp - q); ctx.lineTo(X + kk, Yp - kk); ctx.lineTo(X + q, Yp); ctx.lineTo(X + kk, Yp + kk); ctx.lineTo(X, Yp + q); ctx.lineTo(X - kk, Yp + kk); ctx.lineTo(X - q, Yp); ctx.lineTo(X - kk, Yp - kk); ctx.closePath(); ctx.fill();
+          if (v.zoom > 0.5) text('✸ ' + ev.name, X + 16 * zf, Yp - 14 * zf, 11.5, 'rgba(255,240,205,.95)', 'left', '600');
+          continue;
+        }
+        if (ev.kind !== 'comet') continue;
+        const ang = ev.id * 2.399, L = 130 * zf, hx = sx[c] + Math.cos(ang) * (u - 0.5) * L, hy = sy[c] + Math.sin(ang) * (u - 0.5) * L * 0.6;
+        const star = SKY.stars[c], [tx, ty] = awayFromSun(star[1] * RAD, star[2] * RAD, 3, sun);
+        let dx = tx - sx[c], dy = ty - sy[c]; const dl = Math.hypot(dx, dy) || 1; dx /= dl; dy /= dl;
+        const tl = 140 * zf, px2 = -dy, py2 = dx; // the ion tail runs along (dx, dy); the dust tail leans to one side
+        const ion = ctx.createLinearGradient(hx, hy, hx + dx * tl, hy + dy * tl); ion.addColorStop(0, 'rgba(140,210,255,.9)'); ion.addColorStop(1, 'rgba(140,210,255,0)');
+        ctx.strokeStyle = ion; ctx.lineWidth = 2.2 * zf; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + dx * tl, hy + dy * tl); ctx.stroke();
+        const dust = ctx.createLinearGradient(hx, hy, hx + dx * tl * 0.8, hy + dy * tl * 0.8); dust.addColorStop(0, 'rgba(255,226,170,.6)'); dust.addColorStop(1, 'rgba(255,226,170,0)');
+        ctx.strokeStyle = dust; ctx.lineWidth = 7 * zf; ctx.beginPath(); ctx.moveTo(hx, hy); ctx.quadraticCurveTo(hx + dx * tl * 0.5 + px2 * 12 * zf, hy + dy * tl * 0.5 + py2 * 12 * zf, hx + dx * tl * 0.85 + px2 * 30 * zf, hy + dy * tl * 0.85 + py2 * 30 * zf); ctx.stroke();
+        const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, 16 * zf); g.addColorStop(0, 'rgba(255,255,255,.95)'); g.addColorStop(0.35, 'rgba(190,230,255,.5)'); g.addColorStop(1, 'rgba(190,230,255,0)');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(hx, hy, 16 * zf, 0, TAU); ctx.fill();
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(hx, hy, 2.2 * zf, 0, TAU); ctx.fill();
+        if (v.zoom > 0.5) text('☄ ' + ev.name, hx + 12 * zf, hy - 10 * zf, 11.5, 'rgba(210,235,255,.95)', 'left', '600');
       }
     }
 
@@ -328,6 +447,7 @@
       }
 
       if (ui.borders !== false) drawTerritories(S);
+      if (ui.skyLayer !== false && Y_) drawEcliptic();
 
       const evHot = new Set(), evEdges = new Set();
       for (const ev of S.events) for (const e of ev.edges) if (!ev.restored.includes(e)) { evEdges.add(e); evHot.add(SKY.edges[e][0]); evHot.add(SKY.edges[e][1]); }
@@ -489,6 +609,8 @@
         for (const [i, name, col] of hq) if (svis[i] && (i === S.home || !S.stars[i])) text(name, sx[i], sy[i] - 16, v.zoom < 1 ? 10 : 11.5, col, 'center', '600');
       }
 
+      if (Y_) { if (ui.skyLayer !== false) drawShowers(t, ui, S); drawEventBodies(t, S); }
+
       // fleets (drawn on the nearest world copy)
       for (const f of S.fleets) {
         const ra1 = sra[f.from], Y1 = sY[f.from];
@@ -532,6 +654,7 @@
         anim.to.y0 = anim.from.y0 + wrapY(anim.to.y0 - anim.from.y0);
       },
       goMessier(i) { const m = SKY.messier[i]; goTo(m.ra, m.dec, Math.max(v.zoom, 3.2), 0, true); },
+      goShower(i) { const sh = SH[i]; goTo(sh.ra, sh.dec, Math.max(v.zoom, 1.6), 0, true); },
       setFocus(x, y) { focus.x = x; focus.y = y; },
       screenOf(i) { return { x: sx[i], y: sy[i], vis: svis[i] }; },
       setView(ra, dec, zoom, focused) {
