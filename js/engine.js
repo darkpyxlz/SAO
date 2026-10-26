@@ -365,7 +365,7 @@
     function setCorpName(name) {
       const n = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 32);
       if (!n) return result(false, 'A company needs a name.');
-      S.corp.name = n;
+      S.corp.name = n; S.corp.renamed = true;
       return result(true, 'Renamed to ' + n + '.');
     }
 
@@ -973,7 +973,7 @@
       routeLevel, routeUpgradeCost, canUpgradeRoute, upgradeRoute,
       spawnEvent, redraw, useHint, eventReward, dismissPetition, addPetition,
       consStatus, frontier, attention, expansionTargets, messierTargets, buildOptions, messierStats, lvl, fmt, sepDeg,
-      academy, academySync, academyLevels, Astro,
+      academy, academySync, academyLevels, Astro, now: () => nowFn(),
       serialize() { S.saved = nowFn(); return JSON.stringify(S); },
     };
   }

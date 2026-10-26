@@ -785,7 +785,8 @@
   }
 
   // ---------------------------------------------------------------- quests
-  function openQuests() { openModal({ id: 'quests', title: 'Quests', tabs: null, keepScroll: true, render: renderQuests }); }
+  ui.questChapter = null;
+  function openQuests() { ui.questChapter = null; openModal({ id: 'quests', title: 'Quests', tabs: null, keepScroll: true, render: renderQuests }); }
   function questRow(q) {
     const pctDone = Math.min(100, q.cur / q.target * 100);
     return '<div class="quest' + (q.done ? ' done' : '') + '"><div class="row"><b class="grow">' + esc(q.title) + '</b>' + (q.chapter ? '<span class="badge">' + esc(q.chapter) + '</span>' : '') + '</div>' +
@@ -795,12 +796,17 @@
       (q.done ? '<button class="btn small gold" data-act="quest-claim" data-id="' + q.id + '">Claim</button>' : q.kind === 'contract' ? '<button class="btn small ghost" data-act="quest-reroll" data-id="' + q.id + '" title="Swap for a different contract">⟲</button>' : '') + '</div></div>';
   }
   function renderQuests(body) {
-    const L = QU.list();
-    let h = '<p class="muted" style="margin-top:0;max-width:640px">Contracts are short repeatable jobs that refresh as you finish them. Story quests are long goals across the whole game. Rewards are worth minutes of your revenue, so they keep up as you grow.</p>';
+    const L = QU.list(ui.questChapter);
+    let h = '<p class="muted" style="margin-top:0;max-width:640px">Contracts are short repeatable jobs that refresh as you finish them. Story quests are long goals across the whole game, in ' + L.chapters.length + ' chapters. Rewards are worth minutes of your revenue, so they keep up as you grow.</p>';
     const nReady = L.contracts.concat(L.story).filter(q => q.done).length;
     if (nReady) h += '<div class="row"><button class="btn gold" data-act="quest-claim-all">Claim all ' + nReady + ' ready' + kb('Enter') + '</button></div>';
     h += '<h3>Contracts</h3><div class="quests">' + L.contracts.map(questRow).join('') + '</div>';
-    h += '<h3>Story <span class="muted tiny">' + L.claimedCount + ' / ' + L.total + ' completed' + (L.later ? ' · ' + L.later + ' more to unlock' : '') + '</span></h3><div class="quests">' + L.story.map(questRow).join('') + '</div>';
+    h += '<h3>Story <span class="muted tiny">' + L.claimedCount + ' / ' + L.total + ' completed' + (L.chapter ? '' : ' · the next goal of every chapter') + '</span></h3>';
+    h += '<div class="filters" style="margin-bottom:8px"><span class="chip' + (L.chapter ? '' : ' on') + '" data-act="quest-chapter" data-chapter="">Next goals</span>' +
+      L.chapters.map(c => '<span class="chip' + (L.chapter === c.name ? ' on' : '') + (c.done === c.total ? ' cyan' : c.ready ? ' gold' : '') + '" data-act="quest-chapter" data-chapter="' + esc(c.name) + '" title="' + c.done + ' of ' + c.total + ' done">' + esc(c.name) + ' <span class="muted">' + c.done + '/' + c.total + '</span></span>').join('') + '</div>';
+    const cc = L.chapters.find(c => c.name === L.chapter);
+    if (cc) h += '<p class="muted" style="max-width:640px;margin:0 0 8px">' + esc(cc.blurb) + '</p>';
+    h += '<div class="quests">' + (L.story.length ? L.story.map(questRow).join('') : '<p class="muted">Every goal in this chapter is done.</p>') + '</div>';
     body.innerHTML = h;
   }
 
@@ -939,7 +945,7 @@
         '<h3>Constellations</h3><p>A <b>developed</b> constellation (every star colonised, 3+ levels each) is stamped in the Codex and unlocks one-tap collection there. <b>Mastered</b> at 9+ levels each.</p>' +
         '<h3>Sky School</h3><p>Five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, identify Messier objects by photograph, number, name and type, and cover the Olympiad Academy. Rewards are modest. Everything runs on spaced repetition: an item needs 10 correct answers, spaced further and further apart, before it is <b>learned</b>. Track it all under <b>Codex → Learning</b>.</p>' +
         '<h3>Olympiad Academy</h3><p>The astronomy-olympiad syllabus in ten topics (sky and time, orbital mechanics, telescopes and optics, light, stars, magnitudes and distances, stellar evolution, the Solar System and exoplanets, galaxies and cosmology): facts, <b>diagrams</b> of telescope designs, orbits and the H–R diagram, and numerical problems with fresh numbers every time. Practise in Sky School; open <b>Corporation → Academy</b> for each topic’s level, formula sheet and diagrams. Mastering a topic raises it through three levels, and every level is a <b>permanent</b> bonus for the whole company.</p>' +
-        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a long <b>story</b> chain. Rewards are worth minutes of your revenue.</p>' +
+        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a <b>story</b> of more than 300 goals in fifteen chapters. The list offers the next goal of every chapter; tap a chapter to see all that is left in it. Rewards are worth minutes of your revenue.</p>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
         '<h3>Petitions</h3><p>Colonies sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. Nothing in this game dims, decays or is taken from you.</p>' +
         '<h3 class="k-only">Keyboard</h3><p class="k-only">Every window and most actions have a key, shown on the buttons. <b>Space</b> expands (sends a colony ship or survey mission), <b>C</b> opens the Codex, <b>1–9</b> build in the selected colony and <b>R</b> collects. Press <b>?</b> for the full list (Menu → Keys).</p></div>';
@@ -974,6 +980,7 @@
     'upgrade-route': el => { const r = G.upgradeRoute(+el.dataset.e); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'quest-claim': el => { const r = QU.claim(el.dataset.id); toast(r.ok ? 'Quest reward: +' + money(r.reward.cash) + '  +' + rp(r.reward.research) : r.msg, r.ok ? 'gold' : 'bad'); },
     'quest-reroll': el => { QU.rerollContract(el.dataset.id); },
+    'quest-chapter': el => { ui.questChapter = el.dataset.chapter || null; },
     'quest-claim-all': () => {
       const L = QU.list(); let cash = 0, res = 0, n = 0;
       for (const q of L.contracts.concat(L.story)) if (q.done) { const r = QU.claim(q.id); if (r.ok) { cash += r.reward.cash; res += r.reward.research; n++; } }

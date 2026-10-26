@@ -61,9 +61,15 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
 - **Developed constellations**: colonise every star and develop each to ≥3 levels. It is stamped in the Codex
   (with a page per constellation: chart, lore, stars, neighbours, your own notes) and unlocks one-tap
   collection. **Mastered** at ≥9 levels each.
-- **Quests**: three repeatable *contracts* plus a long *story* chain (expansion, development, revenue, the
-  corporation, technology, buildings, routes, Messier, comets, Sky School, landmark groups like Orion's Belt
-  or the Southern Cross). Rewards are worth minutes of your revenue, so they keep pace as you grow.
+- **Quests**: three repeatable *contracts* plus a story of more than 300 goals in fifteen chapters (Expansion,
+  Revenue, Corporation, Development, Technology, Buildings, Routes, Flagships, Spectra, Messier, Landmarks, Skies,
+  Petitions, Sky School and the Olympiad Academy). The list offers the next goal of every chapter; tap a chapter
+  to see everything left in it. Chapters reach from "colonise 2 stars" to "Earn $100B", "all 757 stars", every
+  spectral class and brightness tier, each building and technology, the nine Messier showpieces, famous
+  asterisms (Orion's Belt, the Summer Triangle, the Southern Cross, the Teapot, the Northern Cross, the Winter
+  Hexagon, the four Royal Stars...), developing named constellations and the whole Zodiac, and every Academy
+  topic at level 3. Progress counts lifetime totals or high-water marks, so a finished goal never un-finishes.
+  Rewards are worth minutes of your revenue, so they keep pace as you grow.
 - **Sky School** (gold button): five-question minigames that pay a little cash and research. *Constellations*:
   name a figure, pick the figure for a name, match a myth to a constellation, find a neighbour. *Stars*:
   which star is circled, what colour is it, which is brighter, which constellation is it in. *Messier*:

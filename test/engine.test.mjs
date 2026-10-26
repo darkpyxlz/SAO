@@ -702,7 +702,7 @@ test('quests: story quests complete from state and pay out once; contracts refre
   let L = QU.list();
   assert.equal(L.contracts.length, 3);
   assert.equal(new Set(L.contracts.map(c => c.title)).size, 3);
-  assert.ok(L.story.length >= 5 && L.total >= 30);
+  assert.ok(L.story.length >= 10 && L.chapters.length >= 12 && L.total >= 250, 'the next goal of every chapter is on offer');
   assert.equal(QU.readyCount(), 0);
   // claim five stars: "Claim 5 stars" completes
   claimMany(G, regionOf(G, G.state.home, 2));
@@ -719,7 +719,7 @@ test('quests: story quests complete from state and pay out once; contracts refre
   assert.equal(c.cur, 0);
   const tm = QU.TEMPLATES.find(x => c.title === x.title(c.target));
   assert.ok(tm, 'contract matches a template');
-  G.state.stats.claimed += 100; G.state.stats.upgrades += 100; G.state.stats.collects += 100; G.state.stats.routeUps += 100; G.state.stats.lanes += 100; G.state.stats.eventsDone += 100; G.state.quiz.stats.correct += 100;
+  G.state.stats.claimed += 100; G.state.stats.upgrades += 100; G.state.stats.collects += 100; G.state.stats.routeUps += 100; G.state.stats.eventsDone += 100; G.state.quiz.stats.correct += 100;
   const cs = QU.list().contracts.filter(x => x.done);
   assert.ok(cs.length >= 1);
   const before = QU.list().contracts.length;
@@ -730,6 +730,97 @@ test('quests: story quests complete from state and pay out once; contracts refre
   const H = Engine.create(SKY); H.load(JSON.parse(G.serialize()));
   assert.ok(H.state.quests.claimed[done.id]);
   assert.equal(Quests.create(H).list().contracts.length, 3);
+});
+
+const LEGACY_QUESTS = ["claim5","claim15","claim40","claim100","claim250","claim500","claim757","upg10","upg50","upg200","upg600","dev1","dev5","dev15","dev40","dev88","mast1","mast5","mast20","collect20","collect200","rank2","rank3","rank4","rank5","rank6","market3","classG","classM","tech1","tech8","tech15","tech21","bld1","bldclear","station","bld10","bldtypes","bldlvl3","bld40","dyson1","route5","route30","mes1","mes5","mes15","mes40","mes110","meskinds","event1","event5","event15","perfect3","quiz20","quiz100","quiz400","learn1","learn5","learn25","perfectq","named5","named20","belt","triangle","cross","dipper"];
+
+test('quests: ids are unique, old ids survive, and every star, constellation and Messier object they name exists', () => {
+  const Quests = require('../js/quests.js');
+  const G = mk('Sirius', 2);
+  const QU = Quests.create(G, { rng: seeded(5) });
+  const ids = QU.STORY.map(q => q.id);
+  assert.equal(new Set(ids).size, ids.length, 'quest ids are unique');
+  assert.ok(ids.length >= 300, 'a long story: ' + ids.length);
+  LEGACY_QUESTS.forEach(id => assert.ok(ids.includes(id), 'quest ' + id + ' kept, so claimed flags in old saves still match'));
+  const titles = QU.STORY.map(q => q.title);
+  assert.equal(new Set(titles).size, titles.length, 'no two story quests share a title: ' + titles.filter((t, k) => titles.indexOf(t) !== k).join(' | '));
+  for (const q of QU.STORY) {
+    assert.ok(q.title && q.desc && q.chapter, q.id + ' is described');
+    assert.ok(QU.CHAPTERS.includes(q.chapter), q.id + ' is in a listed chapter: ' + q.chapter);
+    assert.ok(q.target > 0 && q.mins > 0 && Number.isFinite(q.target), q.id + ' has a target and a reward');
+    assert.ok(q.title.length <= 48, q.id + ' title fits a row: ' + q.title);
+    const refs = q.refs || {};
+    for (const n of refs.stars || []) assert.ok(G.nameIdx.has(n), q.id + ': no star called ' + n);
+    for (const n of refs.consts || []) assert.ok(SKY.consts.some(c => c.name === n), q.id + ': no constellation called ' + n);
+    for (const n of refs.messier || []) assert.ok(SKY.messier.some(m => m.n === n), q.id + ': no M' + n);
+    for (const k of ['stars', 'consts', 'messier']) if (refs[k]) assert.equal(q.target, refs[k].length, q.id + ' counts the ' + k + ' it names');
+  }
+  // a chapter never gets lost: every chapter has quests, and the list reports them all
+  const L = QU.list();
+  assert.deepEqual(L.chapters.map(c => c.name), QU.CHAPTERS);
+  L.chapters.forEach(c => assert.ok(c.blurb && c.total > 0, c.name + ' has an introduction and quests'));
+  assert.equal(L.chapters.reduce((n, c) => n + c.total, 0), QU.STORY.length);
+  assert.equal(L.chapters.reduce((n, c) => n + c.done, 0), 0);
+  // the default view offers exactly one open goal per chapter, a chapter view offers all that is left in it
+  assert.equal(new Set(L.story.map(q => q.chapter)).size, L.story.length);
+  const ch = QU.list('Spectra');
+  assert.ok(ch.story.length > 5 && ch.story.every(q => q.chapter === 'Spectra'));
+  assert.equal(QU.list('no such chapter').story.length, L.story.length, 'an unknown chapter falls back to the default view');
+});
+
+test('quests: nothing is finished at the start, whichever star you begin at', () => {
+  const Quests = require('../js/quests.js');
+  for (const home of ['Sirius', 'Polaris', 'α And', 'Vega']) {
+    const G = mk(home, 4);
+    const QU = Quests.create(G, { rng: seeded(5) });
+    const open = QU.STORY.filter(q => q.cur() >= q.target).map(q => q.id);
+    assert.deepEqual(open, [], home + ' starts with nothing ready');
+    assert.equal(QU.readyCount(), 0);
+  }
+});
+
+test('quests: a fully built and fully studied sky completes every story quest, and finished quests stay finished', () => {
+  const Quests = require('../js/quests.js');
+  const G = mk('Sirius', 3);
+  const S = G.state, QU = Quests.create(G, { rng: seeded(5) });
+  SKY.stars.forEach((_, i) => { S.stars[i] = { t: 0, s: 0, i: 0, r: 5, b: 5, o: 5 }; });
+  SKY.messier.forEach((_, m) => { S.messier[m] = { t: 0, dev: 1 }; });
+  G.TECHS.forEach(t => { S.tech.done[t.id] = 1; });
+  G.Astro.TOPICS.forEach(t => { S.academy.lvl[t.id] = 3; });
+  const kinds = Object.keys(G.BUILDINGS);
+  G.recalc();
+  // every kind of building at level 3 on enough colonies, without going through the slot rules
+  G.d.claimed.forEach(i => { S.buildings[i] = kinds.map(id => ({ id, lvl: 3, t: 0, paid: { cash: 0, research: 0 } })); });
+  for (let e = 0; e < 30; e++) S.routeLvl[e] = 3;
+  Object.assign(S.stats, { collected: 2e11, auto: 1e11, upgrades: 1e4, eventsDone: 100, perfect: 50, restoredRoutes: 500, petitionsDone: 200, collects: 2e4, routeUps: 1000, flagCollects: 2000, flagCash: 1e10, marketEvents: 100 });
+  Object.assign(S.quiz.stats, { answered: 6000, correct: 5000, rounds: 500, perfect: 200, bestStreak: 99 });
+  const rec = () => ({ ok: 3000, bad: 0, last: 0, box: 10, due: 0, learned: 1 });
+  for (let k = 0; k < SKY.consts.length; k++) S.quiz.const[k] = rec();
+  for (let k = 0; k < 110; k++) { S.quiz.messier[k] = rec(); S.quiz.star[k] = rec(); }
+  for (let k = 0; k < G.Astro.CARDS.length; k++) S.quiz.astro['card' + k] = rec();
+  S.market.hi = 5000; assert.ok(G.setCorpName('Test Cosmic Ltd').ok); S.created = G.now() - 400 * 86400e3;
+  G.recalc();
+  assert.ok(G.d.totalRate * 3600 > 1e6, 'a developed sky earns millions an hour');
+  const behind = QU.STORY.filter(q => q.cur() < q.target).map(q => q.id + ' ' + q.cur() + '/' + q.target);
+  assert.deepEqual(behind, [], 'every quest can be completed');
+  assert.equal(QU.readyCount(), QU.STORY.length);
+  // knock the sky down again: buildings demolished, income collapsed. Anything finished stays finished.
+  QU.list();
+  S.buildings = {}; S.cash = 0; G.recalc();
+  S.stars = { [S.home]: S.stars[S.home] }; G.recalc();
+  const after = QU.STORY.filter(q => q.cur() < q.target).map(q => q.id);
+  const mustHold = after.filter(id => /^(bld|b_|clear|lvl3|rate|station|dyson1|treasury)/.test(id));
+  assert.deepEqual(mustHold, [], 'building and income goals do not un-finish when buildings are demolished');
+  // claiming every one pays out and marks it claimed
+  S.stars = {}; SKY.stars.forEach((_, i) => { S.stars[i] = { t: 0, s: 0, i: 0, r: 5, b: 5, o: 5 }; }); G.recalc();
+  let n = 0;
+  for (const q of QU.list().story) if (q.done && QU.claim(q.id).ok) n++;
+  assert.ok(n > 10);
+  const all = QU.list();
+  for (const c of QU.CHAPTERS) for (const q of QU.list(c).story) if (q.done) QU.claim(q.id);
+  assert.equal(QU.list().claimedCount, QU.STORY.length, 'every story quest can be claimed');
+  assert.equal(QU.list().story.length, 0);
+  assert.ok(all.chapters.length >= 12);
 });
 
 test('saves from v2 (before hubs and quests) load and gain the new fields', () => {
