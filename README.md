@@ -9,8 +9,8 @@ arrive from the south pole (Miller cylindrical projection, with a faint graticul
 star on the 88 constellation stick figures is a possible colony (757 of them, with their real positions,
 brightness and colour). The figure lines are your trade routes; short "hyperlanes" join neighbouring
 constellations. All 110 Messier objects are survey sites. It is a solo, PvE game with no decay: three rival
-companies expand across the sky at about your own pace, but they never attack, nothing is ever taken from you,
-and no star has special powers.
+companies expand across the sky at about your own pace and slowly raid your border colonies (always with a
+warning, and a captured colony keeps its levels and can be taken back), and no star has special powers.
 
 Only the 20 most important stars carry proper names (the 19 brightest named stars, from Sirius to Deneb,
 plus Polaris). Every other star is shown by its official designation: Bayer letter (β Ori), Flamsteed number
@@ -28,12 +28,22 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   ×6. Pressing Space buys the best revenue for the money, so the dear stars are deliberate purchases.
 - **Rival companies.** Three rivals start on far-apart flagships and expand at **about your own pace**: every star
   you add earns each of them a share of one (90%, 75% and 60%), they favour lead stars and flagships, they only
-  grow while you do, and they **never attack you or take what is yours**. The map tints each empire's ground and
+  grow while you do. The map tints each empire's ground and
   draws its **borders** (a Voronoi territory around every held star, limited to a reach; toggle with `V` or the ◩
   button). A star a rival holds can be **taken over** once it touches your territory (a turning dashed ring marks
   them; `X` jumps to the next): it costs **2.5×** its normal price, so the rivals' flagships and lead stars are
   dear. Once the free sky is gone the rest is won by takeover, and a rival that loses its last star is acquired.
   Corporation → Overview shows who holds what.
+- **Raids: rivals take your stars, slowly.** Every star you add earns each rival a small share of a raid (about one
+  raid in 40 stars for the three together; none while you have fewer than 15 colonies). Only while you are playing,
+  a rival with credit sends an **assault fleet** against one of your colonies on its border: you get at least 90 seconds'
+  warning (a red chip, a dashed line and a pulsing ring on the map, a toast, the odds). The colony's **defence**
+  (3 + 2.5 per development level + 4 per building level + 15 for a flagship's garrison, +25 for 30 minutes after you
+  **Reinforce** it with `W`, which costs 80% of the going rate) is set against the rival's strength (6 + 1.6√stars); the
+  chance of the raid succeeding is strength ÷ (strength + defence). Headquarters can never be captured. A captured
+  colony is **occupied, not destroyed**: it keeps its levels and buildings (its uncollected vault is seized), and you can
+  take it back at 60% of a takeover price, with everything restored. Raids never run while you are away, and the clock of
+  a raid in flight stops when you close the game. Taking the rival star it sails from cancels it.
 - **Develop** colonies: *Industry* (more revenue), *Logistics* (faster ships, stronger routes, more fleet
   slots), *R&D* (produces **research points ◉**).
 - **Stars and their bonuses**: every star has a **spectral class** (O B A F G K M, estimated from its colour, with
@@ -86,10 +96,10 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
 - **Developed constellations**: colonise every star and develop each to ≥3 levels. It is stamped in the Codex
   (with a page per constellation: chart, lore, stars, neighbours, your own notes) and unlocks one-tap
   collection. **Mastered** at ≥9 levels each.
-- **Quests**: three repeatable *contracts* plus a story of more than 380 goals in seventeen chapters (Expansion,
+- **Quests**: three repeatable *contracts* plus a story of nearly 400 goals in seventeen chapters (Expansion,
   Revenue, Corporation, Rivals, Development, Technology, Buildings, Routes, Flagships, Spectra, Messier, Landmarks,
   Skies, Calendar, Petitions, Sky School and the Olympiad Academy). The list offers the next goal of every chapter; tap a chapter
-  to see everything left in it. Chapters reach from "colonise 2 stars" to "Earn $100B", "all 757 stars", every
+  to see everything left in it. A goal once reached stays reached, even if a rival later captures the colonies behind it. Chapters reach from "colonise 2 stars" to "Earn $100B", "all 757 stars", every
   spectral class and brightness tier, each building and technology, the nine Messier showpieces, famous
   asterisms (Orion's Belt, the Summer Triangle, the Southern Cross, the Teapot, the Northern Cross, the Winter
   Hexagon, the four Royal Stars...), developing named constellations and the whole Zodiac, and every Academy
@@ -143,6 +153,7 @@ Keys are ignored while you type in a text box, and window keys toggle (press aga
 | `Shift` `Space` | Send a ship to the best new star for every idle ship |
 | `N` / `M` / `G` / `P` | Jump to the next free star to colonise / Messier object to survey / flagship or colony with cash waiting (flagships first) / petition. `Shift` goes backwards |
 | `X` | Jump to the next rival star next to your territory, to take over (Space then sends the takeover fleet) |
+| `W` | Jump to the next colony a rival could raid, those already under attack first (`Shift` goes backwards). With a colony selected, `W` **reinforces** it (+25 defence for 30 minutes of play) |
 | `V` / `Y` | Show or hide the empire borders / the ecliptic and the meteor shower radiants |
 | `H` | Headquarters (while redrawing: show hints) |
 | `R` | Collect revenue at the selected colony (`Shift` `R`: the whole constellation once developed) |
@@ -169,7 +180,7 @@ It is a static site with no build step for the game itself.
 
 ```sh
 npm run serve        # http://localhost:8000
-npm test             # engine tests (data, economy, prices, rivals and takeovers, buildings, tech, events, quests, saves, pacing), Academy tests (every card, every generator checked against an independent calculation, every diagram drawn, levels and perks) and territory geometry tests and year's-sky tests (ecliptic maths against the equinoxes and solstices, the shower calendar, watching showers, cataloguing comets)
+npm test             # engine tests (data, economy, prices, rivals, takeovers and raids, buildings, tech, events, quests, saves, pacing, random play), Academy tests (every card, every generator checked against an independent calculation, every diagram drawn, levels and perks) and territory geometry tests and year's-sky tests (ecliptic maths against the equinoxes and solstices, the shower calendar, watching showers, cataloguing comets)
 ```
 
 | File | Purpose |

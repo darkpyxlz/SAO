@@ -403,6 +403,37 @@
       }
     }
 
+    // assault fleets: a dashed line from the rival star to the colony it is sailing against, a ship in the rival's colours, and a ringing
+    // red warning (with the time left) on the target
+    const clock = s => { s = Math.max(0, Math.ceil(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+    function drawRaids(t, S) {
+      const zs = Math.pow(v.zoom, 0.25);
+      for (const x of S.raids) {
+        const r = S.rivals[x.rival]; if (!r) continue;
+        const a = x.from, b = x.to, rc = hexRGB(r.color).join(','), frac = Math.max(0, Math.min(1, 1 - x.remaining / x.dur));
+        ctx.setLineDash([5, 5]); ctx.lineDashOffset = -t / 90; ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(255,120,120,.8)';
+        ctx.beginPath(); lineBetween(a, b); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+        const dR = wrap(sra[b] - sra[a]), dY = wrapY(sY[b] - sY[a]);
+        const pos = k => ({ x: px(sra[a]) - dR * k * scale, y: py(sY[a] + dY * k) });
+        const p = pos(frac), e = pos(Math.min(1, frac + 0.02));
+        if (p.x > -20 && p.x < W + 20 && p.y > -20 && p.y < H + 20) {
+          const ang = Math.atan2(e.y - p.y, e.x - p.x), tail = pos(Math.max(0, frac - 0.04));
+          ctx.strokeStyle = 'rgba(' + rc + ',.6)'; ctx.lineWidth = 2.4; ctx.beginPath(); ctx.moveTo(tail.x, tail.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(ang);
+          ctx.fillStyle = 'rgb(' + rc + ')'; ctx.strokeStyle = 'rgba(255,150,150,.95)'; ctx.lineWidth = 1.2;
+          ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-4.5, -4.5); ctx.lineTo(-2, 0); ctx.lineTo(-4.5, 4.5); ctx.closePath(); ctx.fill(); ctx.stroke();
+          ctx.restore();
+        }
+        if (svis[b]) {
+          const rr = Math.max(1.8, 4.6 - 0.6 * SKY.stars[b][3]) * zs, pulse = 0.5 + 0.5 * Math.sin(t / 240);
+          ctx.strokeStyle = 'rgba(255,110,110,' + (0.55 + 0.4 * pulse).toFixed(2) + ')'; ctx.lineWidth = 2.2;
+          ctx.beginPath(); ctx.arc(sx[b], sy[b], rr + 13 + pulse * 4, 0, TAU); ctx.stroke();
+          ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,110,110,.45)'; ctx.beginPath(); ctx.arc(sx[b], sy[b], rr + 20 + pulse * 4, 0, TAU); ctx.stroke();
+          if (v.zoom > 0.9) text('⚠ ' + clock(x.remaining), sx[b], sy[b] - rr - 24, 11.5, 'rgb(255,150,150)', 'center', '600');
+        }
+      }
+    }
+
     function render(t, ui) {
       if (!W) return;
       stepAnim();
@@ -521,6 +552,7 @@
       // stars
       const front = ui.frontier;
       const zs = Math.pow(v.zoom, 0.25);
+      const showFront = ui.borders !== false && v.zoom > 0.9 && D.count >= G.CFG.raidMinColonies; // the colonies a raid could strike, once raids begin
       for (let i = 0; i < N; i++) {
         if (!svis[i]) continue;
         const st = SKY.stars[i], mag = st[3], claimed = !!S.stars[i];
@@ -543,6 +575,11 @@
           if (ui.takeover && ui.takeover.has(i)) { // within reach of a takeover: a dashed ring that turns
             ctx.strokeStyle = 'rgba(' + rc + ',.95)'; ctx.lineWidth = 1.4; ctx.setLineDash([3, 3]); ctx.lineDashOffset = -t / 80;
             ctx.beginPath(); ctx.arc(x, y, r + 8 + 1.2 * Math.sin(t / 420 + i), 0, TAU); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+          }
+          if (S.occupied && S.occupied[i]) { // formerly yours: it kept its levels and buildings, and is cheaper to take back
+            ctx.strokeStyle = 'rgba(255,217,138,.9)'; ctx.lineWidth = 1.3; ctx.setLineDash([2, 3]);
+            ctx.beginPath(); ctx.arc(x, y, r + 5.5, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+            if (v.zoom > 1.4) text('occupied', x, y + r + 16, 10, 'rgba(255,217,138,.9)', 'center');
           }
         }
         if (claimed) {
@@ -585,6 +622,16 @@
           } else if (!flag && s.s + s.i > 0 && cap > 0 && s.s >= cap * 0.35) {
             ctx.fillStyle = 'rgba(255,217,138,.9)'; ctx.beginPath(); ctx.arc(x + r + 3, y - r - 3, 2, 0, TAU); ctx.fill();
           }
+          if (G.guarded(i)) { // reinforced against raids: three cyan arcs turn around the colony
+            const gr = r + 8 + rings * 2.6, a0 = t / 1400;
+            ctx.strokeStyle = 'rgba(127,227,255,.8)'; ctx.lineWidth = 1.8; ctx.beginPath();
+            for (let k = 0; k < 3; k++) { const a = a0 + k * 2.094; ctx.moveTo(x + Math.cos(a) * gr, y + Math.sin(a) * gr); ctx.arc(x, y, gr, a, a + 0.95); }
+            ctx.stroke();
+          }
+          if (showFront) { // on the front line: a rival star is next door, and this is how likely a raid on it would succeed
+            const th = G.threatOf(i);
+            if (th && th.odds >= 0.3) { ctx.fillStyle = th.odds >= 0.55 ? 'rgba(255,110,110,.95)' : 'rgba(255,190,120,.9)'; ctx.beginPath(); ctx.arc(x - r - 3, y + r + 3, 2.2, 0, TAU); ctx.fill(); }
+          }
         } else if (front.has(i)) {
           const pulse = 0.5 + 0.5 * Math.sin(t / 700 + i * 0.7);
           ctx.strokeStyle = 'rgba(143,180,255,' + (0.25 + 0.3 * pulse).toFixed(2) + ')'; ctx.lineWidth = 1;
@@ -610,6 +657,7 @@
       }
 
       if (Y_) { if (ui.skyLayer !== false) drawShowers(t, ui, S); drawEventBodies(t, S); }
+      drawRaids(t, S);
 
       // fleets (drawn on the nearest world copy)
       for (const f of S.fleets) {

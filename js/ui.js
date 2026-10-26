@@ -145,7 +145,7 @@
       h += '<button class="home" data-act="newgame" data-i="' + i + '"><b><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(name) + '</b> <span class="muted tiny">' + esc(SKY.consts[st[5]].name) + ' · mag ' + st[3].toFixed(2) + '</span><small>' + esc(txt) + '</small></button>';
     }
     h += '</div><p><label class="btn small">Import a save file<input type="file" accept=".json,application/json" id="imp-start" hidden></label></p>';
-    h += '<ul class="how"><li>Every colony earns <b class="gold">cash</b>, which waits in storage until you collect it. Research the Telegraph and its successors to bank most of it automatically.</li><li>The 20 named stars are your <b class="gold">flagships</b>: nearby colonies remit royalties to them, and they never bank themselves, so you keep coming back.</li><li>Spend cash on colony ships to expand along constellation lines and hyperlanes. The map wraps in both directions.</li><li>Research technology (<b class="cyan">◉ research points</b>) to unlock real-world-inspired buildings: telescopes, launch pads, fusion plants, Dyson swarms.</li><li>Neighbouring colonies of different colours boost each other through trade routes. Every star’s spectral class and brightness give it a bonus.</li><li>Three rival companies expand across the sky at about your pace. They never attack, but they hold the stars they take, so the free stars run out and you win the rest by takeover. Important stars cost more.</li><li>Real comets and novae cut routes: redraw them from memory for a bonus. Meteor showers run on the real calendar, and the ecliptic is on the map (Y).</li><li>Your progress saves in this browser. Menu → Export keeps a backup.</li><li class="k-only">On a keyboard? Space expands, C opens the codex, and ? lists every shortcut.</li></ul></div>';
+    h += '<ul class="how"><li>Every colony earns <b class="gold">cash</b>, which waits in storage until you collect it. Research the Telegraph and its successors to bank most of it automatically.</li><li>The 20 named stars are your <b class="gold">flagships</b>: nearby colonies remit royalties to them, and they never bank themselves, so you keep coming back.</li><li>Spend cash on colony ships to expand along constellation lines and hyperlanes. The map wraps in both directions.</li><li>Research technology (<b class="cyan">◉ research points</b>) to unlock real-world-inspired buildings: telescopes, launch pads, fusion plants, Dyson swarms.</li><li>Neighbouring colonies of different colours boost each other through trade routes. Every star’s spectral class and brightness give it a bonus.</li><li>Three rival companies expand across the sky at about your pace. They hold the stars they take and slowly raid your border colonies (always with a warning, and an occupied colony keeps its levels and can be taken back), so the free stars run out and you win the rest by takeover. Important stars cost more.</li><li>Real comets and novae cut routes: redraw them from memory for a bonus. Meteor showers run on the real calendar, and the ecliptic is on the map (Y).</li><li>Your progress saves in this browser. Menu → Export keeps a backup.</li><li class="k-only">On a keyboard? Space expands, C opens the codex, and ? lists every shortcut.</li></ul></div>';
     el.innerHTML = h;
     const imp = $('#imp-start');
     if (imp) imp.onchange = e => { if (e.target.files[0]) importFile(e.target.files[0], st => beginSession(st, false)); };
@@ -154,7 +154,7 @@
     toast('Welcome, CEO. Your HQ is already earning: tap it to collect revenue, then colonise a neighbouring star.' + (matchMedia('(hover: hover) and (pointer: fine)').matches ? ' Press ? for keyboard shortcuts.' : ''), 'gold');
     ui.sel = { type: 'star', i: G.state.home };
     const rv = G.rivals();
-    if (rv.length) setTimeout(() => toast('Rivals are founding too: ' + rv.map(r => r.name).join(', ') + '. They race you for stars at about your pace but never attack.', 'gold'), 1500);
+    if (rv.length) setTimeout(() => toast('Rivals are founding too: ' + rv.map(r => r.name).join(', ') + '. They race you for stars at about your pace and slowly raid your border colonies, with a warning.', 'gold'), 1500);
   }
 
   // ---------------------------------------------------------------- map interaction
@@ -305,24 +305,55 @@
     if (f >= 0) return '<div class="p-sec"><h4>Sector</h4><div class="tiny">' + Math.round(cfg.royaltyShare * 100) + '% of this colony’s revenue (' + rateText(D.rate[i] * cfg.royaltyShare) + ') is booked at the flagship <span class="link" data-act="sel-star" data-i="' + f + '">' + esc(SKY.stars[f][6]) + '</span>. Collect it there.</div></div>';
     return '<div class="p-sec"><h4>Sector</h4><div class="tiny muted">No flagship of yours is in reach yet, so this colony keeps all its revenue. Colonise a named star to open a sector office.</div></div>';
   }
+  // ---- raids: what protects a colony, who could strike it, and what an occupied one is worth
+  const clock = sec => { sec = Math.max(0, Math.ceil(sec)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); };
+  const pct = x => Math.round(x * 100) + '%';
+  const num1 = x => String(Math.round(x * 10) / 10);
+  function raidBanner(i) { // live numbers are filled in by renderPanel (data-lv), so the panel is not rebuilt every second
+    const x = G.raidsNow().find(y => y.to === i);
+    if (!x) return '';
+    const r = G.state.rivals[x.rival];
+    return '<div class="p-sec alert"><h4>⚠ Under attack</h4><div class="row"><span class="grow"><b style="color:' + r.color + '">' + esc(r.name) + '</b> lands in <b data-lv="raid-eta">0:00</b></span><b class="bad"><span data-lv="raid-odds">0%</span> to succeed</b></div><div class="bar red"><i data-lv="raid-bar" style="width:0%"></i></div><div class="muted tiny" style="margin-top:4px">Collect its vault first (a captured colony’s vault is seized). Development, buildings, a flagship’s garrison and <b>Reinforce</b> all raise its defence.</div></div>';
+  }
+  function defenceSection(i) {
+    const S = G.state, cfg = G.CFG;
+    if (i === S.home) return '<div class="p-sec"><h4>Defence</h4><div class="tiny">Headquarters can never be captured.</div></div>';
+    const p = G.defenceParts(i), th = G.threatOf(i), n = G.d.count;
+    const bits = [cfg.defenceBase + ' base'];
+    if (p.levels) bits.push(cfg.defencePerLevel + ' × ' + plural(p.levels, 'development level'));
+    if (p.buildings) bits.push(cfg.defencePerBuilding + ' × ' + plural(p.buildings, 'building level'));
+    if (p.flagship) bits.push(cfg.defenceFlagship + ' flagship garrison');
+    if (p.guard) bits.push(cfg.reinforceBoost + ' reinforcement');
+    let h = '<div class="p-sec"><h4>Defence</h4><div class="row"><b style="font-size:18px">' + num1(G.defenceOf(i)) + '</b><span class="muted tiny">' + esc(bits.join(' + ')) + '</span><span class="grow"></span>';
+    if (p.guard) h += '<span class="badge cyan">reinforced · <span data-lv="guard">' + dur(G.guardLeft(i)) + '</span> left</span>';
+    else { const chk = G.canReinforce(i); h += '<button class="btn small" data-act="reinforce" data-i="' + i + '"' + (chk.ok ? '' : ' disabled') + ' title="+' + cfg.reinforceBoost + ' defence for ' + Math.round(cfg.reinforceSecs / 60) + ' minutes of play">Reinforce ' + money(G.reinforceCost()) + kb('W') + '</button>'; }
+    h += '</div>';
+    if (th) { const r = S.rivals[th.rival]; h += '<div class="tiny" style="margin-top:4px">Next to <b style="color:' + r.color + '">' + esc(r.name) + '</b> (strength ' + num1(G.rivals()[r.id].strength) + '): a raid on this colony would succeed <b class="' + (th.odds >= 0.5 ? 'bad' : 'gold') + '">' + pct(th.odds) + '</b> of the time.</div>'; }
+    else h += '<div class="muted tiny" style="margin-top:4px">No rival holds a star next to this colony, so it cannot be raided right now.</div>';
+    if (n < cfg.raidMinColonies) h += '<div class="muted tiny">Rivals start raiding once you hold ' + cfg.raidMinColonies + ' colonies (you have ' + n + ').</div>';
+    else if (th && !p.guard) h += '<div class="muted tiny">Reinforcing adds ' + cfg.reinforceBoost + ' defence for ' + Math.round(cfg.reinforceSecs / 60) + ' minutes of play.</div>';
+    return h + '</div>';
+  }
   function starPanel(i) {
     const S = G.state, D = G.d, st = SKY.stars[i], s = S.stars[i], con = SKY.consts[st[5]];
     let h = '<div class="p-head"><h3>' + esc(st[6]) + '</h3><button class="x" data-act="close-panel" aria-label="Close">✕</button></div>';
     const rank = G.starRank(i), rvi = G.rivalOf(i), rival = rvi >= 0 ? S.rivals[rvi] : null;
     h += '<div class="p-sub"><span class="link" data-act="open-const" data-c="' + st[5] + '">' + esc(con.name) + '</span> · <span class="dot" style="background:' + rgbOf(i) + '"></span>' + CL[G.cls[i]] + ' · mag ' + st[3].toFixed(2) + (G.isFlagship(i) ? ' · <span class="badge gold">★ flagship</span>' : rank.kind === 'lead' ? ' · <span class="badge">lead star</span>' : '') + (i === S.home ? ' · <span class="badge cyan">HQ</span>' : '') + '</div>';
     if (rival) h += '<div class="p-sub"><span class="dot" style="background:' + rival.color + '"></span>Held by <b style="color:' + rival.color + '">' + esc(rival.name) + '</b>' + (rival.home === i ? ' · <span class="badge">their headquarters</span>' : '') + '</div>';
+    const occ = !s ? G.occupiedInfo(i) : null;
+    if (occ) { const nb = G.buildingsAt(i).length; h += '<div class="p-sub"><span class="badge gold">↩ occupied</span> since ' + dstr(occ.at) + '. It kept ' + plural(occ.r + occ.b + occ.o, 'development level') + (nb ? ' and ' + plural(nb, 'building') : '') + ', restored when you take it back.</div>'; }
     if (!s) {
       const chk = G.canLaunchTo(i), price = G.starPrice(i);
       const origins = G.frontierOrigins(i).map(o => ({ o, sec: G.travelSeconds(o.from, o.deg, false, o.e) })).sort((a, b) => a.sec - b.sec);
       const pend = G.targetsPending().has(i);
-      h += '<div class="p-sec"><h4>' + (rival ? 'Take over' : 'Colonise') + '</h4>';
+      h += '<div class="p-sec"><h4>' + (occ ? 'Take it back' : rival ? 'Take over' : 'Colonise') + '</h4>';
       if (pend) h += '<div class="row"><span class="badge gold">A ' + (rival ? 'takeover fleet' : 'colony ship') + ' is bound here</span></div>';
       else {
         h += '<div class="row"><span class="l">' + (rival ? 'Takeover cost' : 'Cost') + '</span><span class="grow"></span><b class="' + (S.cash >= price ? 'gold' : 'bad') + '">' + money(price) + '</b></div>';
-        h += '<div class="row tiny muted"><span>' + esc(rank.label) + ': the going rate ' + money(G.claimCost()) + ' × ' + rank.mul + (rival ? ' × ' + G.CFG.takeoverMul + ' to take it from a rival' : '') + '</span></div>';
+        h += '<div class="row tiny muted"><span>' + esc(rank.label) + ': the going rate ' + money(G.claimCost()) + ' × ' + rank.mul + (rival ? ' × ' + G.CFG.takeoverMul + ' to take it from a rival' + (occ ? ' × ' + G.CFG.reclaimMul + ' because it was yours' : '') : '') + '</span></div>';
         if (origins.length) h += '<div class="row"><span class="l">Flight</span><span class="grow"></span><span>' + dur(origins[0].sec) + ' from ' + esc(SKY.stars[origins[0].o.from][6]) + '</span></div>';
         const flying = S.fleets.length >= D.slots;
-        h += '<div class="row"><button class="btn primary grow" data-act="launch" data-i="' + i + '"' + (chk.ok ? '' : ' disabled') + '>' + (rival ? (flying ? 'Queue a takeover' : 'Send takeover fleet') : (flying ? 'Queue a charter' : 'Send colony ship')) + kb('Space') + '</button></div>';
+        h += '<div class="row"><button class="btn primary grow" data-act="launch" data-i="' + i + '"' + (chk.ok ? '' : ' disabled') + '>' + (rival ? (flying ? 'Queue a takeover' : occ ? 'Send fleet to take it back' : 'Send takeover fleet') : (flying ? 'Queue a charter' : 'Send colony ship')) + kb('Space') + '</button></div>';
         if (!chk.ok) h += '<div class="muted tiny">' + esc(chk.msg) + '</div>';
         else if (flying) h += '<div class="muted tiny">All ' + D.slots + ' ships are out. The charter is paid now and sails when one is free.</div>';
       }
@@ -332,6 +363,7 @@
       return h;
     }
     const cap = G.stockCap(i), icap = G.resCap(i);
+    h += raidBanner(i);
     h += '<div class="p-sec"><h4>Revenue</h4><div class="bar"><i data-lv="bar" style="width:0%"></i></div>';
     h += '<div class="row tiny"><span class="gold" data-lv="stock">$0</span><span class="muted" data-lv="cap"></span><span class="grow"></span>' + (icap > 0 ? '<span class="cyan" data-lv="res">◉ 0</span>' : '') + '</div>';
     h += '<div class="row"><button class="btn gold grow" data-act="collect" data-i="' + i + '">Collect revenue' + kb('R') + '</button></div>';
@@ -340,7 +372,7 @@
     if (D.auto[i] > 0) h += '<div class="tiny cyan" style="margin-top:4px">⟳ ' + Math.round(D.auto[i] * 100) + '% of what this colony keeps is banked automatically (Treasury technology and Clearing House).</div>';
     if (G.isFlagship(i)) h += '<div class="tiny gold" style="margin-top:4px">★ A flagship never banks itself: collect here for the ' + Math.round(G.CFG.flagshipPremium * 100) + '% dividend premium.</div>';
     h += '</div>';
-    h += flagshipSection(i) + starSection(i);
+    h += defenceSection(i) + flagshipSection(i) + starSection(i);
     const pet = S.petitions.find(p => p.star === i);
     if (pet) h += '<div class="p-sec"><h4>Petition</h4><div class="row"><span class="grow">' + esc(petitionText(pet)) + '</span></div><div class="row tiny"><span class="gold">+' + money(pet.reward) + '</span><span class="cyan">+' + pet.research + ' ◉</span><span class="grow"></span><button class="btn small ghost" data-act="dismiss-pet" data-id="' + pet.id + '">Dismiss</button></div></div>';
     h += '<div class="p-sec"><h4>Development</h4>';
@@ -433,6 +465,9 @@
       if (q('stock')) q('stock').textContent = money(s.s);
       if (q('cap')) q('cap').textContent = '/ ' + money(cap) + ' · full in ' + (s.s >= cap ? 'now' : dur((cap - s.s) / Math.max(1e-9, D.accr[i] * (1 - D.auto[i]))));
       if (q('res')) q('res').textContent = '◉ ' + fmt(s.i) + ' / ' + fmt(icap);
+      const raid = G.raidsNow().find(x => x.to === i);
+      if (raid && q('raid-eta')) { q('raid-eta').textContent = clock(raid.remaining); q('raid-odds').textContent = pct(raid.odds); q('raid-bar').style.width = Math.round(100 * (1 - raid.remaining / raid.dur)) + '%'; }
+      if (q('guard')) q('guard').textContent = dur(G.guardLeft(i));
       if (q('rate')) q('rate').textContent = rateText(D.rate[i]);
       if (q('rbreak')) {
         const known = G.baseRate[i] * (1 + 0.5 * s.r) * D.routeMul[i] * D.globalOut, extra = known > 0 ? D.rate[i] / known : 1;
@@ -480,6 +515,9 @@
     const full = G.attention();
     const chips = [];
     if (S.events.length && !ui.redraw) chips.push('<span class="chip red" data-act="redraw-start" data-id="' + S.events[0].id + '">☄ routes cut' + kb('E') + '</span>');
+    for (const x of G.raidsNow()) chips.push('<span class="chip red" data-act="goto-raid" data-i="' + x.to + '" title="' + esc(S.rivals[x.rival].name) + ' is attacking: ' + pct(x.odds) + ' to succeed. Collect, reinforce or develop it.">⚠ ' + esc(SKY.stars[x.to][6]) + ' under attack · ' + clock(x.remaining) + ' · ' + pct(x.odds) + '</span>');
+    const occN = Object.keys(S.occupied).length;
+    if (occN) chips.push('<span class="chip" data-act="goto-occupied" title="A rival captured these. They keep their levels and buildings, and are cheaper to take back.">↩ ' + plural(occN, 'occupied colony', 'occupied colonies') + ' to take back</span>');
     const flags = full.filter(a => a.why === 'flagship'), plain = full.filter(a => a.why === 'full');
     if (flags.length) chips.push('<span class="chip gold" data-act="goto-full">★ ' + flags.length + ' flagship' + (flags.length === 1 ? '' : 's') + ' ready to collect' + kb('G') + '</span>');
     if (plain.length) chips.push('<span class="chip gold" data-act="goto-full">$ ' + plain.length + ' colon' + (plain.length === 1 ? 'y' : 'ies') + ' with full storage' + (flags.length ? '' : kb('G')) + '</span>');
@@ -734,6 +772,16 @@
     hist.forEach((v, k) => { const x = 4 + k / Math.max(1, hist.length - 1) * (W - 8), y = H - 6 - (v - lo) / span * (H - 12); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke();
   }
+  // raids against you: fleets on their way, colonies they hold that you can take back, and the tally
+  function raidsSection() {
+    const S = G.state, now = G.raidsNow(), occ = Object.keys(S.occupied).map(Number).sort((a, b) => a - b), st = S.stats;
+    if (!now.length && !occ.length && !st.starsLost && !st.repelled && !st.reinforced) return '';
+    let h = '<h3>Raids <span class="muted tiny">rivals against your colonies</span></h3><div class="empires">';
+    for (const x of now) { const r = S.rivals[x.rival]; h += '<div class="erow click" data-act="goto-star" data-i="' + x.to + '"><span class="dot" style="background:' + r.color + '"></span><span><b>' + esc(SKY.stars[x.to][6]) + '</b> <span class="badge red">under attack</span> <span class="muted tiny">' + esc(r.name) + ' lands in ' + dur(x.remaining) + '</span></span><span class="tiny"><b class="bad">' + pct(x.odds) + '</b> <span class="muted">vs defence ' + num1(G.defenceOf(x.to)) + '</span></span></div>'; }
+    for (const i of occ) { const o = S.occupied[i], r = S.rivals[S.owner[i]]; if (!r) continue; h += '<div class="erow click" data-act="goto-star" data-i="' + i + '"><span class="dot" style="background:' + r.color + '"></span><span><b>' + esc(SKY.stars[i][6]) + '</b> <span class="badge gold">↩ occupied</span> <span class="muted tiny">by ' + esc(r.name) + ' · keeps ' + plural(o.r + o.b + o.o, 'level') + (G.buildingsAt(i).length ? ' and ' + plural(G.buildingsAt(i).length, 'building') : '') + '</span></span><span class="tiny gold">' + money(G.starPrice(i)) + ' to take back</span></div>'; }
+    h += '</div><div class="muted tiny" style="margin:-4px 0 10px">Colonies lost ' + st.starsLost + ' · assaults repelled ' + st.repelled + ' · colonies taken back ' + (st.reclaimed || 0) + ' · reinforcements ' + st.reinforced + '. Raids only run while you are playing, always with a warning.</div>';
+    return h;
+  }
   // who holds what: you, the rival companies and the free sky
   function rivalsSection() {
     const S = G.state, R = G.rivals(), mine = G.d.count, N = SKY.stars.length, held = R.reduce((a, r) => a + r.n, 0), free = N - mine - held;
@@ -745,10 +793,12 @@
       if (r.out) bad.push('<span class="badge gold">acquired by you</span>');
       else { if (r.touching) bad.push('<span class="badge">borders you</span>'); if (!r.capitalHeld) bad.push('<span class="badge gold">HQ taken</span>'); }
       if (r.lost && !r.out) bad.push('<span class="badge">lost ' + r.lost + '</span>');
+      if (r.captured) bad.push('<span class="badge red">took ' + r.captured + ' of yours</span>');
+      if (r.repelled) bad.push('<span class="badge green">repelled ' + r.repelled + '</span>');
       h += row(r.color, r.name, r.n, bad.join(' '), r.n > 0 ? r.home : undefined);
     }
     h += row('rgba(150,165,205,.7)', 'Free sky', free, '');
-    h += '</div><div class="muted tiny" style="margin:-4px 0 10px;max-width:640px">Rivals expand at about your own pace (each takes ' + R.map(r => Math.round(r.ratio * 100) + '%').join(', ') + ' as many stars as you add) but never attack you. A star a rival holds costs ' + G.CFG.takeoverMul + '× its price to take over, and flagships and constellation leaders cost the most. Press <b>V</b> to show or hide borders on the map.</div>';
+    h += '</div><div class="muted tiny" style="margin:-4px 0 10px;max-width:640px">Rivals expand at about your own pace (each takes ' + R.map(r => Math.round(r.ratio * 100) + '%').join(', ') + ' as many stars as you add) and slowly raid the colonies on their border, always with a warning: a captured colony keeps its levels and buildings and can be taken back for ' + Math.round(G.CFG.reclaimMul * 100) + '% of a takeover. A star a rival holds costs ' + G.CFG.takeoverMul + '× its price to take over, and flagships and constellation leaders cost the most. Press <b>V</b> to show or hide borders on the map.</div>';
     return h;
   }
   const CORP_RENDER = {
@@ -756,16 +806,16 @@
       const S = G.state, D = G.d, rk = G.rankInfo(), M = S.market;
       let h = '<div class="row" style="max-width:560px"><input id="corp-rename" class="txt grow" maxlength="32" value="' + esc(S.corp.name) + '" aria-label="Company name"><button class="btn small" data-act="rename-corp">Rename</button></div>';
       h += '<div class="rankcard"><div class="row"><b style="font-size:19px">' + esc(rk.title) + '</b><span class="grow"></span><span class="muted tiny">' + plural(rk.count, 'colony', 'colonies') + '</span></div>';
-      h += rk.next ? '<div class="bar"><i style="width:' + Math.min(100, (rk.count - G.RANKS[rk.idx].at) / (rk.next.at - G.RANKS[rk.idx].at) * 100) + '%"></i></div><div class="muted tiny">' + plural(rk.next.at - rk.count, 'more colony', 'more colonies') + ' to become a ' + esc(rk.next.title) + '</div>' : '<div class="muted tiny">The highest corporate rank. The whole sky is yours.</div>';
+      h += rk.next ? '<div class="bar"><i style="width:' + Math.max(0, Math.min(100, (rk.count - G.RANKS[rk.idx].at) / (rk.next.at - G.RANKS[rk.idx].at) * 100)) + '%"></i></div><div class="muted tiny">' + plural(rk.next.at - rk.count, 'more colony', 'more colonies') + ' to become a ' + esc(rk.next.title) + '</div>' : '<div class="muted tiny">The highest corporate rank. The whole sky is yours.</div>';
       h += '</div>';
       const ch = priceChange();
       h += '<div class="stat-grid"><div class="stat"><b class="gold">' + money(D.totalRate * 3600) + '/h</b><span>revenue</span></div><div class="stat"><b class="cyan">' + fmt(D.totalRes * 3600) + ' RP/h</b><span>research</span></div><div class="stat"><b>' + money(G.valuation()) + '</b><span>valuation</span></div><div class="stat"><b>' + D.buildingCount + '</b><span>buildings</span></div><div class="stat"><b>' + (G.techCount() - 1) + ' / ' + (G.TECHS.length - 1) + '</b><span>technologies</span></div><div class="stat"><b>' + D.slots + '</b><span>fleet slots</span></div><div class="stat"><b>' + Math.round(D.manualShare * 100) + '%</b><span>of your income waits for a visit</span></div><div class="stat"><b class="gold">' + G.FLAGS.filter(f => S.stars[f]).length + ' / ' + G.FLAGS.length + '</b><span>flagships</span></div></div>';
       h += '<div class="pricebox"><div class="row"><b>' + esc(ticker(S.corp.name)) + '</b><span style="font-size:20px;font-weight:600">$' + M.price.toFixed(2) + '</span><span class="' + (ch >= 0 ? 'good' : 'bad') + '">' + (ch >= 0 ? '▲' : '▼') + Math.abs(ch).toFixed(2) + '%</span><span class="grow"></span><span class="muted tiny">all-time high $' + M.hi.toFixed(2) + '</span></div><canvas class="spark" id="spark"></canvas><div class="muted tiny">The share price follows the company’s worth (cash, revenue and colonies) with market noise.</div></div>';
-      h += rivalsSection();
+      h += raidsSection() + rivalsSection();
       if (M.kind) { const m = G.MARKETS[M.kind]; h += '<div class="callout"><b>◈ ' + esc(m.name) + '</b> · ' + esc(m.text) + ' · ' + dur(M.remaining) + ' left. <span class="muted">(Market clocks only run while you play.)</span></div>'; }
       else h += '<div class="muted tiny" style="margin-bottom:8px">Markets are calm right now. Booms, bubbles, crunches and contracts come and go while you play.</div>';
       h += '<h3>Headlines</h3>';
-      const heads = S.log.filter(l => ['claim', 'build', 'tech', 'rank', 'market', 'dev', 'messier'].includes(l.kind)).slice(-8).reverse();
+      const heads = S.log.filter(l => ['claim', 'build', 'tech', 'rank', 'market', 'dev', 'messier', 'raid', 'raid-ok'].includes(l.kind)).slice(-8).reverse();
       for (const l of heads) h += '<div class="logline ' + l.kind + '"><time>' + tstr(l.ts) + '</time><span>' + esc(l.text) + '</span></div>';
       body.innerHTML = h;
       sparkline($('#spark'), M.hist.length > 1 ? M.hist : [M.price, M.price]);
@@ -1026,15 +1076,15 @@
         '<li><b>Flagships</b>: the 20 named stars are sector offices. Colonies around one remit 25% of their revenue to it, its vault holds a day, it <b>never banks itself</b> and collecting there pays a dividend premium. Research the <b>Telegraph</b>, <b>Electronic Funds Transfer</b> and <b>Digital Payments</b> and ordinary colonies bank up to 80% of their cash automatically; the flagships still need you, at every stage of the game.</li></ul>' +
         '<h3>Technology and buildings</h3><p>Open <b>Corporation → Technology</b> to research human technology in real time: the telescope, rockets, computers, solar cells, space stations, fusion, space elevators, Dyson swarms and warp drives. Technology unlocks <b>buildings</b> and gives company-wide bonuses. Every three development levels on a colony open a building slot (the rings around the star; each building shows as a little satellite). Revenue buildings such as Solar Farms and Fusion Plants cost what they earn back in a day or two; a <b>Clearing House</b> banks the revenue of a whole region automatically; a <b>Space Station</b> adds slots.</p>' +
         '<h3>The ecliptic, meteor showers and comets</h3><p>Press <b>Y</b> (or the ☄ button) to show the <b>ecliptic</b>: the Sun’s road through the stars, with its zodiac band, a tick for each sign with the date the Sun gets there, the equinoxes, the solstices and the ecliptic poles. <b>Meteor showers</b> run on the real calendar: while one is on, its <b>radiant</b> glows on the map with meteors streaking out of it, and colonies within 25° of it earn more, most at the peak. Open the game during a shower with a colony under its radiant to <b>watch</b> it, for a small permanent bonus (double for the peak). Every <b>comet</b> that cuts your routes is a real one and is drawn with its tail pointing away from the Sun; redraw its routes to catalogue it in <b>Codex → Sky</b>.</p>' +
-        '<h3>Rivals and borders</h3><p>Three rival companies start on far-away flagships and expand at about your own pace: every star you add earns each of them a share of one (90%, 75% and 60%). They never attack you or take what is yours. The map tints each empire’s ground and draws its <b>borders</b>; press <b>V</b> to hide them. A star a rival holds can be <b>taken over</b> once it touches your territory (ringed with a turning dashed circle; <b>X</b> finds them): it costs 2.5 times its normal price, so flagships and lead stars are dear. When the free sky runs out, the rest of the sky is won by takeover, and a rival that loses its last star is acquired.</p>' +
+        '<h3>Rivals and borders</h3><p>Three rival companies start on far-away flagships and expand at about your own pace: every star you add earns each of them a share of one (90%, 75% and 60%). The map tints each empire’s ground and draws its <b>borders</b>; press <b>V</b> to hide them. A star a rival holds can be <b>taken over</b> once it touches your territory (ringed with a turning dashed circle; <b>X</b> finds them): it costs 2.5 times its normal price, so flagships and lead stars are dear. When the free sky runs out, the rest of the sky is won by takeover, and a rival that loses its last star is acquired.</p><p>Rivals also <b>raid you, slowly</b>. Each earns a little raid credit for every star you add, and only while you are playing it sends an <b>assault fleet</b> against one of your colonies on its border. You always get a warning of a minute or two (a red chip, a dashed line and a pulsing ring on the map). Whether the colony holds depends on its <b>defence</b>: development, buildings and a flagship’s garrison, plus <b>Reinforce</b> (<b>W</b>) for half an hour of play. Headquarters can never be taken. A captured colony is <b>occupied, not destroyed</b>: it keeps its levels and buildings (its vault is seized) and you can take it back for 60% of a takeover price. Taking the rival star the fleet sailed from cancels the raid.</p>' +
         '<h3>The company</h3><p>As you grow you are promoted from Startup to Cosmic Monopoly. Your share price follows the company’s worth, and random <b>market conditions</b> (booms, tech bubbles, credit crunches, government contracts) come and go while you play.</p>' +
         '<h3>Messier objects</h3><p>Send a <b>survey mission</b> to a Messier object near one of your colonies. Each type gives a bonus (globulars: fleet slots, open clusters: revenue, nebulae: research, galaxies: speed) and is stamped into the catalogue with its photograph.</p>' +
         '<h3>Constellations</h3><p>A <b>developed</b> constellation (every star colonised, 3+ levels each) is stamped in the Codex and unlocks one-tap collection there. <b>Mastered</b> at 9+ levels each.</p>' +
         '<h3>Sky School</h3><p>Five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, identify Messier objects by photograph, number, name and type, and cover the Olympiad Academy. Rewards are modest. Everything runs on spaced repetition: an item needs 10 correct answers, spaced further and further apart, before it is <b>learned</b>. Track it all under <b>Codex → Learning</b>.</p>' +
         '<h3>Olympiad Academy</h3><p>The astronomy-olympiad syllabus in ten topics (sky and time, orbital mechanics, telescopes and optics, light, stars, magnitudes and distances, stellar evolution, the Solar System and exoplanets, galaxies and cosmology): facts, <b>diagrams</b> of telescope designs, orbits and the H–R diagram, and numerical problems with fresh numbers every time. Practise in Sky School; open <b>Corporation → Academy</b> for each topic’s level, formula sheet and diagrams. Mastering a topic raises it through three levels, and every level is a <b>permanent</b> bonus for the whole company.</p>' +
-        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a <b>story</b> of more than 380 goals in seventeen chapters. The list offers the next goal of every chapter; tap a chapter to see all that is left in it. Rewards are worth minutes of your revenue.</p>' +
+        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a <b>story</b> of nearly 400 goals in seventeen chapters. The list offers the next goal of every chapter; tap a chapter to see all that is left in it. Rewards are worth minutes of your revenue.</p>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
-        '<h3>Petitions</h3><p>Colonies sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. Nothing in this game dims, decays or is taken from you.</p>' +
+        '<h3>Petitions</h3><p>Colonies sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. Nothing in this game dims or decays; a rival can occupy a colony, but never destroys it.</p>' +
         '<h3 class="k-only">Keyboard</h3><p class="k-only">Every window and most actions have a key, shown on the buttons. <b>Space</b> expands (sends a colony ship or survey mission), <b>C</b> opens the Codex, <b>1–9</b> build in the selected colony and <b>R</b> collects. Press <b>?</b> for the full list (Menu → Keys).</p></div>';
     },
     keys(body) {
@@ -1067,6 +1117,9 @@
     'upgrade-route': el => { const r = G.upgradeRoute(+el.dataset.e); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'quest-claim': el => { const r = QU.claim(el.dataset.id); toast(r.ok ? 'Quest reward: +' + money(r.reward.cash) + '  +' + rp(r.reward.research) : r.msg, r.ok ? 'gold' : 'bad'); },
     'quest-reroll': el => { QU.rerollContract(el.dataset.id); },
+    'goto-raid': el => focusStar(+el.dataset.i),
+    'goto-occupied': () => { const sel = ui.sel, list = Object.keys(G.state.occupied).map(Number).sort((a, b) => a - b), t = cycleList(list, sel && sel.type === 'star' ? sel.i : -1, 1); if (t >= 0) focusStar(t); },
+    'reinforce': el => { const r = G.reinforce(+el.dataset.i); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'goto-takeover': () => { const cand = G.takeoverTargets().filter(t => G.canLaunchTo(t).ok); if (cand.length) focusStar(cand[0]); },
     'toggle-sky': () => { ui.skyLayer = !ui.skyLayer; try { localStorage.setItem('firmament.skylayer', ui.skyLayer ? '1' : '0'); } catch (e) { /* private window */ } const b = $('#sky-btn'); if (b) b.classList.toggle('off', !ui.skyLayer); toast(ui.skyLayer ? 'Ecliptic and meteor shower radiants shown.' : 'Ecliptic and meteor shower radiants hidden.', 'good'); },
     'goto-shower': el => { const i = +el.dataset.i; closeModal(); ui.sel = { type: 'shower', i }; sky.goShower(i); if (!ui.skyLayer) runAct('toggle-sky'); },
@@ -1158,6 +1211,7 @@
       [['M'], 'Next Messier object in reach to survey (Shift+M: previous)'],
       [['G'], 'Next flagship or colony with cash waiting, the most first (Shift+G: previous)'],
       [['P'], 'Next petition'],
+      [['W'], 'Next colony a rival could raid, the ones under attack first (Shift+W: previous). With a colony selected, W reinforces it'],
       [['H'], 'Go to headquarters (while redrawing: show hints)'],
     ]],
     ['At the selected colony', [
@@ -1165,6 +1219,7 @@
       [['I'], 'Develop Industry'],
       [['L'], 'Develop Logistics'],
       [['D'], 'Develop R&D'],
+      [['W'], 'Reinforce against rival raids: +' + G.CFG.reinforceBoost + ' defence for ' + Math.round(G.CFG.reinforceSecs / 60) + ' minutes of play'],
       [['1', '…', '9', '0'], 'Build or upgrade the numbered building in the panel (the number is on its button)'],
     ]],
     ['Map', [
@@ -1340,6 +1395,12 @@
       case ' ': expand(shift); return true;
       case 'n': { const t = cycleList(G.expansionTargets(), sel && sel.type === 'star' ? sel.i : -1, shift ? -1 : 1); if (t < 0) toast('No new star to colonise: every free star in reach has a ship bound for it' + (ui.takeover.size ? '. Rival stars next to you can be taken over (X).' : '.'), 'bad'); else focusStar(t); return true; }
       case 'x': { const t = cycleList(G.takeoverTargets(), sel && sel.type === 'star' ? sel.i : -1, shift ? -1 : 1); if (t < 0) toast('No rival holds a star next to your territory yet.', 'bad'); else focusStar(t); return true; }
+      case 'w': {
+        if (colony >= 0 && !shift) { runAct('reinforce', { i: colony }); return true; }
+        const t = cycleList(G.exposed().map(x => x.i), colony, shift ? -1 : 1);
+        if (t < 0) toast('No rival holds a star next to your colonies, so nothing can be raided right now.', 'bad'); else focusStar(t);
+        return true;
+      }
       case 'v': runAct('toggle-borders'); return true;
       case 'y': runAct('toggle-sky'); return true;
       case 'm': { const m = cycleList(G.messierTargets(), sel && sel.type === 'messier' ? sel.i : -1, shift ? -1 : 1); if (m < 0) toast('No Messier object is in reach: colonise a star near one first.', 'bad'); else focusMessier(m); return true; }
@@ -1396,7 +1457,7 @@
     const L = G.state.log;
     for (let k = Math.max(ui.lastLog, L.length - 4); k < L.length; k++) {
       const l = L[k];
-      if (['claim', 'messier', 'dev', 'event', 'petition', 'event-done', 'tech', 'rank', 'market', 'rival', 'sky'].includes(l.kind) && k > 0) toast(l.text, l.kind === 'event' ? 'bad' : 'gold');
+      if (['claim', 'messier', 'dev', 'event', 'petition', 'event-done', 'tech', 'rank', 'market', 'rival', 'sky', 'raid', 'raid-ok'].includes(l.kind) && k > 0) toast(l.text, l.kind === 'event' || l.kind === 'raid' ? 'bad' : l.kind === 'raid-ok' ? 'good' : 'gold');
     }
     if (L.length !== ui.lastLog) scheduleSave();
     ui.lastLog = L.length;

@@ -24,7 +24,7 @@
     const learnedAll = () => learnedCount('const') + learnedCount('star') + learnedCount('messier');
     // star counts by spectral class and brightness tier, worked out once per evaluation
     let memo = null;
-    const fresh = () => { memo = null; bmemo = null; }; // each evaluation starts from the current state
+    const fresh = () => { memo = null; bmemo = null; dmemo = -1; }; // each evaluation starts from the current state
     const profileCounts = () => {
       if (memo) return memo;
       const letters = {}, tiers = {};
@@ -63,6 +63,8 @@
     const bandStars = SKY.stars.map((st, i) => i).filter(i => Math.abs(YS.eqToEcl(SKY.stars[i][1], SKY.stars[i][2])[1]) <= 8);
     const corners = YS.ECLIPTIC_POINTS.filter(p => Math.abs(p.lat) < 90).map(p => near(p.lon, p.lat, 8)), poles = [near(0, 90, 12), near(0, -90, 12)];
     const heldOf = list => list.filter(i => G.state.stars[i]).length;
+    let dmemo = -1;
+    const bestDefence = () => (dmemo >= 0 ? dmemo : (dmemo = G.d.claimed.reduce((m, i) => (i === G.state.home ? m : Math.max(m, G.defenceOf(i))), 0))); // the best-defended colony (never the headquarters)
     const showersWatched = () => Object.keys(G.state.showers).length;
     const peaksCaught = () => Object.values(G.state.showers).filter(r => r.peak).length;
     const cometsSeen = () => Object.keys(G.state.comets).length;
@@ -98,7 +100,7 @@
     add('rename', 'Corporation', 'Your name on the door', 'Give the company a name of your own (Corporation → Overview).', () => (G.state.corp.renamed ? 1 : 0), 1, 2);
     [[1, 15, 'Open for business', 'Keep the company running for a day.'], [7, 60, 'A week of trading', 'Your company is a week old.'], [30, 250, 'A month in business', 'Your company is a month old.'], [100, 800, 'Old money', 'Your company is 100 days old.']].forEach(([n, m, t, d]) => add('age' + n, 'Corporation', t, d, ageDays, n, m));
     // ---- Rivals
-    add('contact1', 'Rivals', 'Border contact', 'Your territory touches a rival company’s. Rivals never attack, but they hold the stars they take (see the borders on the map, V).', () => G.state.rivals.filter(r => r.contact).length, 1, 15);
+    add('contact1', 'Rivals', 'Border contact', 'Your territory touches a rival company’s. Rivals expand at your pace and slowly raid the colonies on their border (see the borders on the map, V).', () => G.state.rivals.filter(r => r.contact).length, 1, 15);
     add('contact3', 'Rivals', 'Neighbours on every side', 'Touch the territory of every rival company.', () => G.state.rivals.filter(r => r.contact).length, rivalCount(), 45);
     [[1, 10], [5, 30], [20, 70], [60, 160], [150, 350], [400, 800]].forEach(([n, m]) => add('take' + n, 'Rivals', n === 1 ? 'First takeover' : 'Take over ' + n + ' stars', 'Take over ' + S_(n, 'star', 'stars') + ' a rival company held. A star a rival holds costs ' + G.CFG.takeoverMul + ' times its price.', () => st().takeovers, n, m));
     [[1, 90], [5, 300], [12, 900]].forEach(([n, m]) => add('tf' + n, 'Rivals', n === 1 ? 'A flagship from a rival' : 'Take ' + n + ' flagships from rivals', 'Take over ' + S_(n, 'flagship', 'flagships') + ' from the rival companies.', () => st().flagTakeovers, n, m));
@@ -107,6 +109,10 @@
     add('acq1', 'Rivals', 'A friendly acquisition', 'Acquire a rival: take over every star it holds, and it is out of the game.', () => st().acquired, 1, 300);
     add('acq3', 'Rivals', 'Sole survivor', 'Acquire every rival company.', () => st().acquired, rivalCount(), 1500);
     [[50, 60], [150, 200], [300, 500], [500, 1200]].forEach(([n, m]) => add('margin' + n, 'Rivals', 'Lead by ' + n, 'Hold ' + n + ' more stars than the biggest rival company.', () => peak('margin', G.d.count - biggestRival()), n, m));
+    [[1, 40, 'Hold the line', 'Repel an assault: a rival’s fleet lands on one of your colonies and fails to take it.'], [5, 150, 'Stand firm', 'Repel 5 assaults.'], [12, 450, 'Unbroken', 'Repel 12 assaults.']].forEach(([n, m, t, d]) => add('repel' + n, 'Rivals', t, d + ' Raids are slow, so this is a goal for the whole game.', () => st().repelled, n, m));
+    [[1, 40, 'Taken back'], [3, 120, 'Reclaimer'], [8, 350, 'No colony left behind']].forEach(([n, m, t]) => add('reclaim' + n, 'Rivals', t, 'Take back ' + S_(n, 'colony', 'colonies') + ' a rival occupied: it keeps its levels and buildings, and costs ' + Math.round(G.CFG.reclaimMul * 100) + '% of a takeover.', () => st().reclaimed, n, m));
+    [[1, 8], [5, 30], [20, 120]].forEach(([n, m]) => add('reinf' + n, 'Rivals', n === 1 ? 'Reinforcements' : 'Reinforce ' + n + ' times', 'Reinforce colonies on a rival’s border ' + S_(n, 'time', 'times') + ' (W). Each reinforcement adds ' + G.CFG.reinforceBoost + ' defence for ' + Math.round(G.CFG.reinforceSecs / 60) + ' minutes of play.', () => st().reinforced, n, m));
+    [[25, 25, 'A garrison'], [50, 90, 'A stronghold'], [80, 250, 'A fortress']].forEach(([n, m, t]) => add('def' + n, 'Rivals', t, 'Bring one colony’s defence to ' + n + ': development levels, buildings, a flagship’s garrison and reinforcement all count (the headquarters cannot be taken, so it does not).', () => peak('def', bestDefence()), n, m));
     add('full', 'Rivals', 'A full sky', 'Fill the sky: no star is left free, and every further star must be won by takeover.', () => SKY.stars.length - free(), SKY.stars.length, 60);
 
     // ---- Calendar: the ecliptic, the meteor showers (watched on the real calendar) and the comets
@@ -265,15 +271,22 @@
       const t = tmpl(c.key), cur = Math.max(0, t.counter() - c.base);
       return { id: 'contract:' + c.id, kind: 'contract', title: t.title(c.target), cur: Math.min(cur, c.target), target: c.target, done: cur >= c.target, claimed: false, reward: rewardFor(c.mins) };
     }
+    // A goal once reached stays reached: a colony captured by a rival, a demolished building or a dip in income never takes it back
+    // (until it is claimed, the reached goals are remembered in state.quests.reached).
+    function reached(d) {
+      const q = Q(), r = q.reached || (q.reached = {});
+      if (!r[d.id] && d.cur() >= d.target) r[d.id] = 1;
+      return !!r[d.id];
+    }
     function storyState(d) {
-      const cur = d.cur(), done = cur >= d.target, claimed = !!Q().claimed[d.id];
+      const done = reached(d), claimed = !!Q().claimed[d.id], cur = done ? d.target : d.cur();
       return { id: d.id, kind: 'story', chapter: d.chapter, title: d.title, desc: d.desc, cur: Math.min(cur, d.target), target: d.target, done, claimed, reward: rewardFor(d.mins) };
     }
     // the chapters in the order a company meets them
     const CHAPTERS = ['Expansion', 'Revenue', 'Corporation', 'Rivals', 'Development', 'Technology', 'Buildings', 'Routes', 'Flagships', 'Spectra', 'Messier', 'Landmarks', 'Skies', 'Calendar', 'Petitions', 'Sky School', 'Academy'];
     const BLURB = {
       Expansion: 'A startup with one telescope and a dream. Every colony ship you send turns another point of light into a business.',
-      Rivals: 'Three rival companies follow your lead across the sky. They never attack, but they hold the stars they take: win them over, one takeover at a time.',
+      Rivals: 'Three rival companies follow your lead across the sky. They hold the stars they take and slowly raid yours: win them back, one takeover at a time.',
       Revenue: 'Cash is how a company keeps score. Collect it, let your treasury bank it, and watch the hourly numbers climb.',
       Corporation: 'Boards, shareholders and the press: the company grows up. Ranks come with colonies, and the share price with the market’s mood.',
       Development: 'A colony is only a claim until you build it up. Industry, Logistics and R&D, level by level, until whole constellations shine.',
@@ -308,7 +321,7 @@
       }
       return { contracts: Q().contracts.map(contractState), story: visible, later: open.length - visible.length, claimedCount: story.length - open.length, total: story.length, chapters, chapter: chapter || null };
     }
-    function readyCount() { fresh(); topUp(); return STORY.filter(d => !Q().claimed[d.id] && d.cur() >= d.target).length + Q().contracts.filter(c => contractState(c).done).length; }
+    function readyCount() { fresh(); topUp(); return STORY.filter(d => !Q().claimed[d.id] && reached(d)).length + Q().contracts.filter(c => contractState(c).done).length; }
     function claim(id) {
       fresh();
       const q = Q();
@@ -326,7 +339,7 @@
       if (q.claimed[id]) return { ok: false, msg: 'Already claimed.' };
       const ss = storyState(d);
       if (!ss.done) return { ok: false, msg: 'Not finished yet.' };
-      q.claimed[id] = G.now();
+      q.claimed[id] = G.now(); if (q.reached) delete q.reached[id];
       G.grant(ss.reward.cash, ss.reward.research);
       return { ok: true, reward: ss.reward, title: ss.title };
     }

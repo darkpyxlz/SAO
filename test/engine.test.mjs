@@ -797,7 +797,7 @@ test('quests: a fully built and fully studied sky completes every story quest, a
   // every kind of building at level 3 on enough colonies, without going through the slot rules
   G.d.claimed.forEach(i => { S.buildings[i] = kinds.map(id => ({ id, lvl: 3, t: 0, paid: { cash: 0, research: 0 } })); });
   for (let e = 0; e < 30; e++) S.routeLvl[e] = 3;
-  Object.assign(S.stats, { collected: 2e11, auto: 1e11, upgrades: 1e4, eventsDone: 100, perfect: 50, restoredRoutes: 500, petitionsDone: 200, collects: 2e4, routeUps: 1000, flagCollects: 2000, flagCash: 1e10, marketEvents: 100, takeovers: 500, flagTakeovers: 20, capitals: 3, acquired: 3 });
+  Object.assign(S.stats, { collected: 2e11, auto: 1e11, upgrades: 1e4, eventsDone: 100, perfect: 50, restoredRoutes: 500, petitionsDone: 200, collects: 2e4, routeUps: 1000, flagCollects: 2000, flagCash: 1e10, marketEvents: 100, takeovers: 500, flagTakeovers: 20, capitals: 3, acquired: 3, repelled: 20, reclaimed: 20, reinforced: 100 });
   S.rivals.forEach(r => { r.contact = true; });
   G.YearSky.SHOWERS.forEach(sh => { S.showers[sh.id] = { t: 0, peak: 1 }; }); G.YearSky.COMETS.forEach(c => { S.comets[c.id] = { t: 0, perfect: true }; });
   Object.assign(S.quiz.stats, { answered: 6000, correct: 5000, rounds: 500, perfect: 200, bestStreak: 99 });
@@ -886,7 +886,7 @@ test('rivals: three companies start on far-apart flagships of their own, with na
   }
 });
 
-test('rivals: they expand at a share of YOUR pace, only while you do, and never take what you hold or are sailing to', () => {
+test('rivals: they expand at a share of YOUR pace, only while you do, and never settle on a star you hold or are sailing to', () => {
   const G = mk('Sirius', 7);
   G.state.cash = 1e13;
   const idle = JSON.stringify(G.state.owner);
@@ -1016,9 +1016,278 @@ test('rivals survive a save, play out identically from the same save, and an old
   assert.ok(Object.keys(H.state.owner).every(k => !H.state.stars[k]));
 });
 
+// ---------------------------------------------------------------- raids: rivals slowly taking your stars
+const peekRoll = seed => { let t = (seed + 0x6D2B79F5) >>> 0; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+const forceRoll = (G, win, odds) => { for (let k = 1; k < 5000; k++) if ((peekRoll(k - 0x6D2B79F5 >>> 0) < odds) === win) { G.state.rseed = (k - 0x6D2B79F5) >>> 0; return; } throw new Error('no seed'); };
+// a company of 24 colonies with a rival's star beside one of them, ready to launch a raid at it
+function raidScene(seed = 5, home = 'Sirius', big = false) {
+  const G = mk(home, seed), S = G.state;
+  claimMany(G, regionOf(G, S.home, 6).slice(0, 30));
+  const edge = [...Object.keys(S.stars).map(Number)].filter(i => i !== S.home && !G.isFlagship(i)).find(i => G.adj[i].some(n => !S.stars[n.to] && G.rivalOf(n.to) < 0));
+  const x = G.adj[edge].map(n => n.to).find(t => !S.stars[t] && G.rivalOf(t) < 0);
+  S.owner[x] = 0;
+  if (big) SKY.stars.map((st, i) => i).filter(i => !S.stars[i] && G.rivalOf(i) < 0 && i !== x && !G.adj[i].some(n => S.stars[n.to])).slice(0, 100).forEach(i => { S.owner[i] = 0; }); // a rival with a hundred stars is a strong one
+  G.recalc();
+  S.rivals[0].raidCredit = 1; S.rivals[0].raidCool = 0;
+  for (const r of S.rivals.slice(1)) r.raidCredit = 0;
+  return { G, S, x, target: edge };
+}
+
+test('raids: a rival with credit launches a warned assault on a colony of yours on its border, only while you play', () => {
+  const { G, S, x } = raidScene();
+  G.tick(1e5, false); G.catchUp(1e6);
+  assert.deepEqual(S.raids, [], 'nothing happens while you are away');
+  G.tick(1, true);
+  assert.equal(S.raids.length, 1, 'a raid is launched');
+  const raid = S.raids[0];
+  assert.ok(G.adj[raid.to].some(n => n.to === raid.from) && S.owner[raid.from] === 0, 'it sails from a rival star next to its target');
+  assert.ok(S.stars[raid.to] && raid.to !== S.home, 'the target is a colony of yours, never headquarters');
+  assert.ok(raid.dur >= G.CFG.raidMinSecs - 1e-9, 'at least ' + G.CFG.raidMinSecs + ' seconds of warning: ' + raid.dur);
+  assert.ok(S.log.some(l => l.kind === 'raid' && /is moving against/.test(l.text) && l.text.includes(SKY.stars[raid.to][6])), 'the warning is logged');
+  assert.equal(S.rivals[0].raidCredit, 0, 'the credit is spent');
+  assert.ok(S.rivals[0].raidCool > 1000, 'a long cooldown follows');
+  assert.ok(G.raidsNow()[0].odds > 0.4 && G.raidsNow()[0].odds < 1, 'odds are shown with the warning: ' + G.raidsNow()[0].odds);
+  // one raid per rival at a time
+  S.rivals[0].raidCredit = 5; S.rivals[0].raidCool = 0; G.tick(1, true);
+  assert.equal(S.raids.length, 1);
+  // the clock of a raid only runs while you play
+  const left = S.raids[0].remaining;
+  G.catchUp(1e5); assert.equal(S.raids[0].remaining, left);
+});
+
+test('raids: credit comes slowly from your growth, and none while the company is tiny', () => {
+  const G = mk('Sirius', 8), S = G.state;
+  S.cash = 1e13;
+  for (let round = 0; round < 3; round++) { for (const t of G.expansionTargets().slice(0, 4)) G.launch(t); G.catchUp(3000); }
+  assert.ok(G.d.count < G.CFG.raidMinColonies && S.rivals.every(r => r.raidCredit === 0), 'a small company is left alone');
+  const from = G.d.count;
+  while (G.d.count < 95) { for (const t of G.expansionTargets().slice(0, 5)) G.launch(t); G.catchUp(3000); }
+  const added = G.d.count - Math.max(from, G.CFG.raidMinColonies - 1);
+  for (const r of S.rivals) {
+    assert.ok(r.raidCredit > 0 && r.raidCredit < 1.2, r.name + ' has built up ' + r.raidCredit.toFixed(2) + ' of a raid after ' + G.d.count + ' colonies');
+    near2(r.raidCredit, G.CFG.raidRatio * r.ratio * added, G.CFG.raidRatio * r.ratio * added * 0.4 + 0.05, 'about ' + G.CFG.raidRatio + ' of a raid per colony added');
+  }
+});
+function near2(a, b, tol, msg) { assert.ok(Math.abs(a - b) <= tol, (msg || '') + ' ' + a + ' vs ' + b); }
+
+test('raids: defence grows with development, buildings and a flagship garrison; reinforcing adds more for a while; the headquarters is safe', () => {
+  const { G, S, target } = raidScene(6);
+  const R = S.rivals[0];
+  const d0 = G.defenceOf(target), odds0 = G.raidOdds(target, R);
+  assert.equal(d0, G.CFG.defenceBase + G.CFG.defencePerLevel * G.lvl(target));
+  S.stars[target].r = 4; S.stars[target].b = 3; S.stars[target].o = 2; G.recalc();
+  assert.equal(G.defenceOf(target), G.CFG.defenceBase + G.CFG.defencePerLevel * 9 + G.CFG.defencePerBuilding * G.buildingsAt(target).reduce((a, b) => a + b.lvl, 0));
+  assert.ok(G.raidOdds(target, R) < odds0, 'a developed colony is harder to take');
+  S.buildings[target] = [{ id: 'observatory', lvl: 2, t: 0, paid: { cash: 0, research: 0 } }]; G.recalc();
+  assert.equal(G.defenceOf(target), G.CFG.defenceBase + G.CFG.defencePerLevel * 9 + G.CFG.defencePerBuilding * 2);
+  // a flagship has a garrison
+  const flag = G.FLAGS.find(f => !S.stars[f] && G.rivalOf(f) < 0);
+  S.stars[flag] = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0 }; G.recalc();
+  assert.equal(G.defenceOf(flag), G.CFG.defenceBase + G.CFG.defenceFlagship);
+  // reinforcing
+  S.cash = 0; assert.ok(!G.canReinforce(target).ok && /Needs/.test(G.canReinforce(target).msg));
+  S.cash = 1e9;
+  const before = G.defenceOf(target), cost = G.reinforceCost();
+  assert.equal(cost, Math.ceil(G.claimCost() * G.CFG.reinforceFrac));
+  const cash0 = S.cash;
+  assert.ok(G.reinforce(target).ok);
+  assert.equal(cash0 - S.cash, cost); assert.equal(G.defenceOf(target) - before, G.CFG.reinforceBoost); assert.ok(G.guarded(target));
+  assert.ok(!G.canReinforce(target).ok, 'not twice');
+  assert.equal(S.stats.reinforced, 1);
+  G.tick(G.CFG.reinforceSecs + 5, true); // it lasts half an hour of play
+  assert.ok(!G.guarded(target) && G.defenceOf(target) === before);
+  assert.ok(G.reinforce(target).ok, 'again once it has lapsed');
+  assert.equal(G.defenceOf(S.home), Infinity); assert.equal(G.raidOdds(S.home, R), 0);
+  assert.ok(!G.canReinforce(S.home).ok);
+  assert.equal(G.threatOf(S.home), null);
+  const th = G.threatOf(target); assert.ok(th && th.rival === 0 && th.odds > 0 && th.odds < 1);
+});
+
+test('raids: the odds are the strength against the defence, and a capture occupies the colony without losing its levels or buildings', () => {
+  const { G, S, x, target } = raidScene(7);
+  const R = S.rivals[0];
+  S.stars[target].r = 2; S.stars[target].b = 1; S.stars[target].o = 0; S.stars[target].s = 123;
+  S.buildings[target] = [{ id: 'observatory', lvl: 1, t: 0, paid: { cash: 0, research: 0 } }];
+  S.petitions.push({ id: 99, star: target, type: 'collect', created: 0, reward: 10, research: 1, fraction: 0.7 });
+  G.recalc();
+  const count0 = G.d.count, n0 = R.n;
+  G.tick(1, true);
+  const raid = S.raids[0];
+  assert.equal(raid.to, target, 'the only colony on its border');
+  const odds = G.raidOdds(target, R);
+  assert.ok(Math.abs(odds - (6 + 1.6 * Math.sqrt(R.n)) / ((6 + 1.6 * Math.sqrt(R.n)) + G.defenceOf(target))) < 1e-12);
+  forceRoll(G, true, odds);
+  G.tick(raid.dur + 1, true);
+  assert.ok(!S.stars[target], 'the colony is occupied');
+  assert.equal(G.rivalOf(target), 0); assert.equal(R.n, n0 + 1); assert.equal(G.d.count, count0 - 1);
+  assert.deepEqual({ r: S.occupied[target].r, b: S.occupied[target].b, o: S.occupied[target].o }, { r: 2, b: 1, o: 0 }, 'its levels are kept');
+  assert.equal(S.buildings[target].length, 1, 'its building still stands, idle');
+  assert.equal(G.d.buildingCount, 0, 'but it works for no one');
+  assert.equal(S.stats.starsLost, 1); assert.equal(R.captured, 1);
+  assert.ok(!S.petitions.some(p => p.star === target), 'its petition is gone');
+  assert.ok(S.log.some(l => l.kind === 'raid' && /has captured/.test(l.text) && /seizing its vault/.test(l.text)));
+  assert.ok(G.takeoverTargets().includes(target), 'it can be taken back');
+  // taking it back costs a discount on a takeover, and restores everything
+  const full = Math.ceil(G.claimCost() * G.starRank(target).mul * G.CFG.takeoverMul);
+  assert.equal(G.starPrice(target), Math.ceil(G.claimCost() * G.starRank(target).mul * G.CFG.takeoverMul * G.CFG.reclaimMul));
+  assert.ok(G.starPrice(target) < full);
+  S.cash = 1e9;
+  for (const q of S.rivals) { q.credit = 0.5; q.raidCredit = 0.5; }
+  const r = G.launch(target); assert.ok(r.ok, r.msg);
+  G.tick(r.sec + 1, true);
+  assert.ok(S.rivals.every(q => q.credit === 0.5 && q.raidCredit === 0.5), 'taking back a colony earns the rivals no expansion or raid credit');
+  assert.ok(S.stars[target], 'back in your hands');
+  assert.deepEqual({ r: S.stars[target].r, b: S.stars[target].b, o: S.stars[target].o }, { r: 2, b: 1, o: 0 }, 'levels restored');
+  assert.ok(S.stars[target].s < 5, 'the seized vault is not given back: ' + S.stars[target].s);
+  assert.equal(S.occupied[target], undefined); assert.equal(G.d.buildingCount, 1);
+  assert.equal(S.stats.reclaimed, 1); assert.equal(S.stats.takeovers, 0, 'a reclaim is not counted as a takeover');
+  assert.ok(S.log.some(l => /Took back/.test(l.text)));
+});
+
+test('raids: a colony that holds repels the assault, and reinforcing makes that likelier', () => {
+  let held = 0, heldReinforced = 0, N = 160;
+  for (const reinforced of [false, true]) {
+    for (let k = 0; k < N; k++) {
+      const { G, S, target } = raidScene(10 + (k % 7), 'Sirius', true);
+      S.stars[target].r = 3; S.stars[target].b = 3; S.stars[target].o = 2; S.cash = 1e9; G.recalc();
+      if (reinforced) G.reinforce(target);
+      G.tick(1, true);
+      const raid = S.raids[0], odds = G.raidOdds(target, S.rivals[0]);
+      S.rseed = (k * 7919 + 13) >>> 0;
+      G.tick(raid.dur + 1, true);
+      const stood = !!S.stars[target];
+      if (reinforced) heldReinforced += stood ? 1 : 0; else held += stood ? 1 : 0;
+      assert.equal(S.stats.repelled, stood ? 1 : 0);
+      if (stood) assert.ok(S.log.some(l => l.kind === 'raid-ok' && /Repelled/.test(l.text)));
+      if (k === 0 && !reinforced) assert.ok(odds > 0.3 && odds < 0.8, 'a developed colony: ' + odds);
+    }
+  }
+  assert.ok(held / N > 0.2 && held / N < 0.6, 'unreinforced holds about as often as the odds say: ' + held / N);
+  assert.ok(heldReinforced > held + N * 0.15, 'reinforcing helps: ' + heldReinforced / N + ' vs ' + held / N);
+});
+
+test('raids: they survive a save, never touch the headquarters or a colony nobody borders, and end when the rival is acquired', () => {
+  const { G, S, target } = raidScene(9);
+  G.tick(1, true);
+  const H = Engine.create(SKY, { rng: seeded(2), now: () => 1e12 });
+  H.load(JSON.parse(G.serialize()));
+  assert.deepEqual(H.state.raids, S.raids, 'the raid in flight is saved');
+  forceRoll(G, true, 1); forceRoll(H, true, 1);
+  G.tick(500, true); H.tick(500, true);
+  assert.deepEqual(H.state.owner, G.state.owner); assert.deepEqual(H.state.occupied, G.state.occupied);
+  // the headquarters is never a target, even when it is the only colony beside a rival
+  const J = mk('Vega', 4); J.state.stars[J.state.home] && null;
+  const nb = J.adj[J.state.home][0].to; J.state.owner[nb] = 0; J.recalc();
+  claimMany(J, regionOf(J, J.state.home, 3).filter(i => i !== nb && !J.adj[nb].some(n => n.to === i && i !== J.state.home)).slice(0, 30));
+  J.state.rivals[0].raidCredit = 5; J.state.rivals[0].raidCool = 0; J.tick(2000, true);
+  for (const x of J.state.raids) assert.notEqual(x.to, J.state.home);
+  assert.ok(J.state.stars[J.state.home]);
+  // a rival that is acquired takes its raids with it
+  const K = raidScene(11);
+  K.G.tick(1, true); assert.equal(K.S.raids.length, 1);
+  for (const k of Object.keys(K.S.owner)) if (K.S.owner[k] === 0 && +k !== K.x) delete K.S.owner[k];
+  K.G.recalc(); K.S.cash = 1e12;
+  const r = K.G.launch(K.x); assert.ok(r.ok, r.msg);
+  K.G.tick(r.sec + 1, true);
+  assert.equal(K.S.rivals[0].n, 0); assert.deepEqual(K.S.raids, []);
+});
+
+test('raids: reinforcing only where a rival is next door; defence adds up from its parts; the exposed colonies are listed, attacked ones first', () => {
+  const { G, S, target } = raidScene(13);
+  S.cash = 1e9;
+  const far = Object.keys(S.stars).map(Number).find(i => i !== S.home && i !== target && !G.threatOf(i));
+  assert.ok(far !== undefined);
+  const r = G.canReinforce(far); assert.ok(!r.ok && /No rival holds a star next to/.test(r.msg), r.msg);
+  assert.equal(S.stats.reinforced, 0);
+  assert.ok(G.canReinforce(target).ok);
+  assert.equal(G.defenceParts(S.home), null); assert.equal(G.defenceParts(far).guard, false);
+  S.stars[target].r = 3; S.stars[target].b = 1; G.recalc();
+  const p = G.defenceParts(target);
+  assert.equal(G.CFG.defenceBase + G.CFG.defencePerLevel * p.levels + G.CFG.defencePerBuilding * p.buildings + (p.flagship ? G.CFG.defenceFlagship : 0) + (p.guard ? G.CFG.reinforceBoost : 0), G.defenceOf(target));
+  // two exposed colonies: the one under attack comes first even though the other is weaker
+  const second = Object.keys(S.stars).map(Number).find(i => i !== S.home && i !== target && G.adj[i].some(n => S.owner[n.to] === 0));
+  if (second === undefined) { const o = G.adj[Object.keys(S.stars).map(Number).find(i => i !== S.home && i !== target && !G.isFlagship(i))][0].to; if (!S.stars[o]) { S.owner[o] = 0; G.recalc(); } }
+  G.tick(1, true);
+  const list = G.exposed();
+  assert.ok(list.length >= 1 && list[0].i === target && list[0].attacked, 'the colony under attack is first');
+  assert.ok(list.every(x => G.threatOf(x.i) && x.odds > 0 && x.odds < 1));
+  G.reinforce(target);
+  assert.ok(G.exposed().find(x => x.i === target).guarded);
+  assert.equal(G.guardLeft(target) > G.CFG.reinforceSecs - 5, true);
+});
+
+test('quests: a goal once reached stays reached when a rival takes a colony, and a promotion is permanent', () => {
+  const Quests = require('../js/quests.js');
+  const { G, S, target } = raidScene(12);
+  const QU = Quests.create(G, { rng: seeded(5) });
+  // trim the company to exactly 25 colonies, keeping the headquarters and the raid target
+  const drop = Object.keys(S.stars).map(Number).filter(i => i !== S.home && i !== target && !G.adj[i].some(n => S.owner[n.to] === 0));
+  while (Object.keys(S.stars).length > 25) delete S.stars[drop.pop()];
+  G.recalc(); assert.equal(G.d.count, 25);
+  const rank = G.rankInfo().idx;
+  assert.ok(QU.list().story.some(q => q.id === 'claim25' && q.done), 'claim25 is reached at 25 colonies');
+  const ready0 = QU.readyCount();
+  G.tick(1, true); const raid = S.raids[0]; assert.equal(raid.to, target);
+  forceRoll(G, true, G.raidOdds(target, S.rivals[0]));
+  G.tick(raid.dur + 1, true);
+  assert.ok(!S.stars[target] && G.d.count === 24, 'the colony is lost');
+  const L = QU.list('Expansion');
+  assert.ok(L.story.some(q => q.id === 'claim25' && q.done && q.cur === q.target), 'the goal is still reached');
+  assert.equal(QU.readyCount(), ready0, 'nothing un-finishes');
+  assert.equal(G.rankInfo().idx, rank, 'the company keeps its rank');
+  const before = S.cash; assert.ok(QU.claim('claim25').ok); assert.ok(S.cash > before, 'and it can still be claimed');
+  assert.equal((S.quests.reached || {}).claim25, undefined, 'a claimed goal is no longer kept in the reached list');
+  assert.ok(QU.STORY.length >= 394, 'the raid quests are in: ' + QU.STORY.length);
+});
+
+test('quests: repelling, reinforcing, reclaiming and fortifying complete the raid goals', () => {
+  const Quests = require('../js/quests.js');
+  const { G, S, target } = raidScene(7);
+  const QU = Quests.create(G, { rng: seeded(5) });
+  const ids = id => QU.list('Rivals').story.some(q => q.id === id && q.done);
+  S.cash = 1e12;
+  assert.ok(!ids('reinf1') && !ids('repel1') && !ids('reclaim1') && !ids('def25'));
+  assert.ok(G.reinforce(target).ok); assert.ok(ids('reinf1'), 'reinforcing once');
+  // a well-developed, well-built colony is a stronghold (the headquarters does not count)
+  S.stars[target].r = 5; S.stars[target].b = 5; S.stars[target].o = 5; G.recalc();
+  assert.ok(G.defenceOf(target) >= 25 + 25 - 10, 'reinforced and developed: ' + G.defenceOf(target));
+  assert.ok(ids('def25') && !ids('def80'));
+  S.stars[S.home].r = 5; S.stars[S.home].b = 5; S.stars[S.home].o = 5; G.recalc();
+  assert.ok(!ids('def80'), 'the headquarters is not a stronghold: it can never be taken');
+  // an assault that fails
+  G.tick(1, true); const raid = S.raids[0]; assert.ok(raid, 'a raid was launched');
+  forceRoll(G, false, G.raidOdds(target, S.rivals[0]));
+  G.tick(raid.dur + 1, true);
+  assert.ok(S.stars[target] && S.stats.repelled === 1 && ids('repel1'));
+  // an assault that wins, then taking it back
+  S.rivals[0].raidCredit = 1; S.rivals[0].raidCool = 0; G.tick(1, true);
+  const raid2 = S.raids[0]; assert.ok(raid2);
+  const lost = raid2.to; forceRoll(G, true, G.raidOdds(lost, S.rivals[0]));
+  G.tick(raid2.dur + 1, true);
+  assert.ok(!S.stars[lost]);
+  S.cash = 1e12; const l = G.launch(lost); assert.ok(l.ok, l.msg); G.tick(l.sec + 1, true);
+  assert.ok(S.stars[lost] && S.stats.reclaimed === 1 && ids('reclaim1'));
+});
+
+test('saves from before raids load with the raid fields, and old stats count from zero', () => {
+  const G = mk('Sirius', 21);
+  const old = JSON.parse(G.serialize());
+  delete old.raids; delete old.raidSeq; delete old.guard; delete old.occupied;
+  for (const k of ['starsLost', 'repelled', 'reclaimed', 'reinforced']) delete old.stats[k];
+  old.rivals.forEach(r => { delete r.raidCredit; delete r.raidCool; delete r.captured; delete r.repelled; });
+  const H = Engine.create(SKY, { rng: seeded(2), now: () => 1e12 });
+  H.load(old);
+  assert.deepEqual(H.state.raids, []); assert.deepEqual(H.state.occupied, {}); assert.deepEqual(H.state.guard, {});
+  assert.ok(H.state.rivals.every(r => r.raidCredit === 0 && r.captured === 0 && r.repelled === 0));
+  for (const k of ['starsLost', 'repelled', 'reclaimed', 'reinforced']) assert.equal(H.state.stats[k], 0, k);
+  H.tick(100, true); H.catchUp(1e5);
+  assert.deepEqual(H.state.raids, []);
+});
+
 function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-test('random play (purchases, takeovers, events, saves, years away) keeps every book straight', () => {
-  for (let seed = 1; seed <= 3; seed++) {
+test('random play (purchases, takeovers, raids, events, saves, years away) keeps every book straight', () => {
+  let launched = 0, lost = 0, retaken = 0, repelled = 0;
+  for (let seed = 1; seed <= 8; seed++) {
     const rnd = mulberry32(seed * 7919), clock = { t: Date.UTC(2025, 0, 1) + Math.floor(rnd() * 365) * 86400e3 };
     let G = Engine.create(SKY, { rng: mulberry32(seed), now: () => clock.t });
     G.newGame(G.nameIdx.get(['Sirius', 'Vega', 'Polaris'][seed % 3]));
@@ -1033,7 +1302,14 @@ test('random play (purchases, takeovers, events, saves, years away) keeps every 
       else if (a < 0.65) {
         S.events = []; const ev = G.spawnEvent();
         if (ev) { const k = Math.floor(rnd() * (ev.edges.length + 1)); for (const e of ev.edges.slice(0, k)) G.redraw(ev.id, SKY.edges[e][0], SKY.edges[e][1]); if (rnd() < 0.5) S.events = []; G.recalc(); }
-      } else if (a < 0.85) { const dt = Math.floor(rnd() * 5000); clock.t += dt * 1000; G.tick(dt, rnd() < 0.6); }
+      } else if (a < 0.72) { // a rival pushes up against one of your colonies, you reinforce it, and the raiders are ready
+        const i = G.d.claimed[Math.floor(rnd() * G.d.claimed.length)], live = S.rivals.filter(r => r.n > 0);
+        S.cash += 1e6 * (1 + G.d.count); G.reinforce(i);
+        const x = G.adj[i].map(n => n.to).find(t => !S.stars[t] && G.rivalOf(t) < 0 && !G.targetsPending().has(t));
+        if (x !== undefined && live.length && rnd() < 0.6) { S.owner[x] = live[Math.floor(rnd() * live.length)].id; G.recalc(); }
+        for (const r of S.rivals) if (rnd() < 0.7) { r.raidCredit = 1; r.raidCool = 0; }
+      }
+      else if (a < 0.85) { const dt = Math.floor(rnd() * 5000); clock.t += dt * 1000; G.tick(dt, rnd() < 0.6); }
       else if (a < 0.93) { const dt = Math.floor(rnd() * 40 * 86400); clock.t += dt * 1000; G.catchUp(dt); }
       else {
         const H = Engine.create(SKY, { rng: mulberry32(seed + n), now: () => clock.t });
@@ -1046,9 +1322,18 @@ test('random play (purchases, takeovers, events, saves, years away) keeps every 
       assert.equal(G.rivals().reduce((x, r) => x + r.n, 0), held.length, 'the rivals’ counts match what they hold');
       for (const v of [G.state.cash, G.state.research, D.totalRate, D.totalRes, D.globalOut]) assert.ok(Number.isFinite(v));
       for (const f of G.state.fleets) if (f.kind === 's') assert.ok(!G.state.stars[f.to], 'a ship is never bound for a star already yours');
-      for (const r of G.state.rivals) assert.ok(r.n >= 0 && Number.isFinite(r.credit) && Number.isFinite(r.cool));
+      for (const r of G.state.rivals) assert.ok(r.n >= 0 && Number.isFinite(r.credit) && Number.isFinite(r.cool) && Number.isFinite(r.raidCredit) && r.raidCredit <= G.CFG.raidCreditCap + 1e-9);
+      const S2 = G.state;
+      assert.ok(S2.stars[S2.home], 'the headquarters is never captured');
+      for (const k of Object.keys(S2.occupied)) assert.ok(!S2.stars[k] && S2.owner[k] === S2.occupied[k].by, 'an occupied colony is a rival’s, with its levels waiting');
+      for (const x of S2.raids) assert.ok(S2.stars[x.to] && x.to !== S2.home && S2.owner[x.from] === x.rival && x.remaining > 0 && x.remaining <= x.dur + 1e-9, 'a raid in flight is valid');
+      assert.equal(new Set(S2.raids.map(x => x.rival)).size, S2.raids.length, 'one raid per rival');
+      assert.equal(S2.stats.starsLost, S2.rivals.reduce((n, r) => n + r.captured, 0), 'the tally of captures matches');
+      for (const k of Object.keys(S2.guard)) assert.ok(S2.stars[k], 'only colonies are reinforced');
     }
+    launched += G.state.raidSeq; lost += G.state.stats.starsLost; retaken += G.state.stats.reclaimed; repelled += G.state.stats.repelled;
   }
+  assert.ok(launched >= 8 && lost >= 5 && retaken >= 3 && repelled >= 1, 'the random games really had raids: launched ' + launched + ', lost ' + lost + ', retaken ' + retaken + ', repelled ' + repelled);
 });
 
 test('saves from v2 (before hubs and quests) load and gain the new fields', () => {
