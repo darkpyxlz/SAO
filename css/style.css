@@ -283,3 +283,13 @@ canvas.qvis.fig { height: auto; max-width: 460px; }
 canvas.qthumb.fig { height: auto; aspect-ratio: 8 / 5; }
 .qtopic { color: var(--cyan); letter-spacing: .05em; text-transform: uppercase; font-size: 11px; margin-bottom: 2px; }
 .badge.tier1 { color: var(--good); } .badge.tier3 { color: var(--bad); } .badge[class*=tier] { margin-left: 6px; font-size: 10px; }
+
+/* ---- rival companies, empire borders ---- */
+#zoomctl .btn.off { opacity: .5; }
+.empires { display: grid; gap: 6px; max-width: 640px; margin-bottom: 10px; }
+.erow { display: grid; grid-template-columns: 12px 1fr auto; gap: 3px 10px; align-items: center; padding: 6px 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; }
+.erow.click { cursor: pointer; }
+.erow.click:hover { border-color: rgba(160, 190, 255, .5); }
+.erow .ebar { grid-column: 2 / 4; height: 5px; background: rgba(255, 255, 255, .06); border-radius: 3px; overflow: hidden; }
+.erow .ebar i { display: block; height: 100%; border-radius: 3px; opacity: .85; }
+.logline.rival span, .logline.rival-note span { color: #ffb3c4; }

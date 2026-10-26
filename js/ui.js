@@ -8,7 +8,9 @@
   const AUTOSAVE = 'firmament.autosave.v1';
   const SLOT = n => 'firmament.slot' + n + '.v1';
 
-  const ui = { lastReady: 0, lastTech: null, sel: null, redraw: null, hint: false, flashes: [], frontier: new Set(), started: false, modal: null, tab: null, filter: {}, lastLog: 0, held: new Map(), fast: false };
+  const ui = { lastReady: 0, lastTech: null, sel: null, redraw: null, hint: false, flashes: [], frontier: new Set(), takeover: new Set(), borders: true, started: false, modal: null, tab: null, filter: {}, lastLog: 0, held: new Map(), fast: false };
+  try { ui.borders = localStorage.getItem('firmament.borders') !== '0'; } catch (e) { /* no storage: borders stay on */ }
+  { const bb = document.querySelector('#borders-btn'); if (bb) bb.classList.toggle('off', !ui.borders); }
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = n => G.fmt(n);
   const money = n => '$' + fmt(n);
@@ -300,18 +302,21 @@
   function starPanel(i) {
     const S = G.state, D = G.d, st = SKY.stars[i], s = S.stars[i], con = SKY.consts[st[5]];
     let h = '<div class="p-head"><h3>' + esc(st[6]) + '</h3><button class="x" data-act="close-panel" aria-label="Close">✕</button></div>';
-    h += '<div class="p-sub"><span class="link" data-act="open-const" data-c="' + st[5] + '">' + esc(con.name) + '</span> · <span class="dot" style="background:' + rgbOf(i) + '"></span>' + CL[G.cls[i]] + ' · mag ' + st[3].toFixed(2) + (G.isFlagship(i) ? ' · <span class="badge gold">★ flagship</span>' : '') + (i === S.home ? ' · <span class="badge cyan">HQ</span>' : '') + '</div>';
+    const rank = G.starRank(i), rvi = G.rivalOf(i), rival = rvi >= 0 ? S.rivals[rvi] : null;
+    h += '<div class="p-sub"><span class="link" data-act="open-const" data-c="' + st[5] + '">' + esc(con.name) + '</span> · <span class="dot" style="background:' + rgbOf(i) + '"></span>' + CL[G.cls[i]] + ' · mag ' + st[3].toFixed(2) + (G.isFlagship(i) ? ' · <span class="badge gold">★ flagship</span>' : rank.kind === 'lead' ? ' · <span class="badge">lead star</span>' : '') + (i === S.home ? ' · <span class="badge cyan">HQ</span>' : '') + '</div>';
+    if (rival) h += '<div class="p-sub"><span class="dot" style="background:' + rival.color + '"></span>Held by <b style="color:' + rival.color + '">' + esc(rival.name) + '</b>' + (rival.home === i ? ' · <span class="badge">their headquarters</span>' : '') + '</div>';
     if (!s) {
-      const chk = G.canLaunchTo(i);
+      const chk = G.canLaunchTo(i), price = G.starPrice(i);
       const origins = G.frontierOrigins(i).map(o => ({ o, sec: G.travelSeconds(o.from, o.deg, false, o.e) })).sort((a, b) => a.sec - b.sec);
       const pend = G.targetsPending().has(i);
-      h += '<div class="p-sec"><h4>Colonise</h4>';
-      if (pend) h += '<div class="row"><span class="badge gold">A colony ship is bound here</span></div>';
+      h += '<div class="p-sec"><h4>' + (rival ? 'Take over' : 'Colonise') + '</h4>';
+      if (pend) h += '<div class="row"><span class="badge gold">A ' + (rival ? 'takeover fleet' : 'colony ship') + ' is bound here</span></div>';
       else {
-        h += '<div class="row"><span class="l">Cost</span><span class="grow"></span><b class="' + (S.cash >= G.claimCost() ? 'gold' : 'bad') + '">' + money(G.claimCost()) + '</b></div>';
+        h += '<div class="row"><span class="l">' + (rival ? 'Takeover cost' : 'Cost') + '</span><span class="grow"></span><b class="' + (S.cash >= price ? 'gold' : 'bad') + '">' + money(price) + '</b></div>';
+        h += '<div class="row tiny muted"><span>' + esc(rank.label) + ': the going rate ' + money(G.claimCost()) + ' × ' + rank.mul + (rival ? ' × ' + G.CFG.takeoverMul + ' to take it from a rival' : '') + '</span></div>';
         if (origins.length) h += '<div class="row"><span class="l">Flight</span><span class="grow"></span><span>' + dur(origins[0].sec) + ' from ' + esc(SKY.stars[origins[0].o.from][6]) + '</span></div>';
         const flying = S.fleets.length >= D.slots;
-        h += '<div class="row"><button class="btn primary grow" data-act="launch" data-i="' + i + '"' + (chk.ok ? '' : ' disabled') + '>' + (flying ? 'Queue a charter' : 'Send colony ship') + kb('Space') + '</button></div>';
+        h += '<div class="row"><button class="btn primary grow" data-act="launch" data-i="' + i + '"' + (chk.ok ? '' : ' disabled') + '>' + (rival ? (flying ? 'Queue a takeover' : 'Send takeover fleet') : (flying ? 'Queue a charter' : 'Send colony ship')) + kb('Space') + '</button></div>';
         if (!chk.ok) h += '<div class="muted tiny">' + esc(chk.msg) + '</div>';
         else if (flying) h += '<div class="muted tiny">All ' + D.slots + ' ships are out. The charter is paid now and sails when one is free.</div>';
       }
@@ -381,7 +386,7 @@
     const lb = learnBadge('messier', m);
     if (lb) h += '<div class="row tiny muted">Sky School: ' + lb + '</div>';
     h += '</div><div class="p-sec"><h4>Launch points</h4>';
-    for (const s of M.links) h += '<div class="row tiny"><span class="grow"><span class="link" data-act="sel-star" data-i="' + s + '">' + esc(SKY.stars[s][6]) + '</span></span>' + (S.stars[s] ? '<span class="badge green">yours</span>' : '<span class="muted">○</span>') + '</div>';
+    for (const s of M.links) h += '<div class="row tiny"><span class="grow"><span class="link" data-act="sel-star" data-i="' + s + '">' + esc(SKY.stars[s][6]) + '</span></span>' + (S.stars[s] ? '<span class="badge green">yours</span>' : G.rivalOf(s) >= 0 ? '<span class="badge" style="color:' + S.rivals[G.rivalOf(s)].color + '">' + esc(S.rivals[G.rivalOf(s)].name) + '</span>' : '<span class="muted">○</span>') + '</div>';
     return h + '</div>';
   }
   function renderPanel() {
@@ -452,6 +457,7 @@
     const idle = Math.max(0, D.slots - S.fleets.length);
     const canGo = idle > 0 && [...ui.frontier].some(t => G.canLaunchTo(t).ok);
     if (canGo) chips.push('<span class="chip" data-act="goto-frontier">➤ ' + idle + ' ship' + (idle === 1 ? '' : 's') + ' idle' + kb('N') + '</span>');
+    else if (idle > 0) { const grab = [...ui.takeover].filter(t => G.canLaunchTo(t).ok); if (grab.length) chips.push('<span class="chip" data-act="goto-takeover">⚑ ' + plural(grab.length, 'rival star') + ' to take over' + kb('X') + '</span>'); }
     if (!S.tech.active && G.TECHS.some(t => G.techStatus(t.id) === 'available' && G.canStartTech(t.id).ok)) chips.push('<span class="chip cyan" data-act="open-corp-tech">⚗ lab idle: research available' + kb('T') + '</span>');
     if (S.market.kind) { const m = G.MARKETS[S.market.kind]; chips.push('<span class="chip" data-act="open-corp" title="' + esc(m.text) + '">◈ ' + esc(m.name) + ' · ' + dur(S.market.remaining) + '</span>'); }
     const ready = QU.readyCount();
@@ -551,7 +557,7 @@
       h += '<table class="t"><tr><th>Name</th><th>Constellation</th><th>Class</th><th>Mag</th><th></th><th></th></tr>';
       for (const i of named) {
         const st = SKY.stars[i], cl = !!S.stars[i];
-        h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(2) + '</td><td>' + (cl ? '<span class="badge green">colonised</span>' : '<span class="badge">not yet</span>') + '</td><td>' + learnBadge('star', i) + '</td></tr>';
+        h += '<tr class="click" data-act="goto-star" data-i="' + i + '"><td><span class="dot" style="background:' + rgbOf(i) + '"></span>' + esc(st[6]) + '</td><td class="muted">' + esc(SKY.consts[st[5]].name) + '</td><td>' + CL[G.cls[i]] + '</td><td>' + st[3].toFixed(2) + '</td><td>' + (cl ? '<span class="badge green">colonised</span>' : G.rivalOf(i) >= 0 ? '<span class="badge" style="color:' + S.rivals[G.rivalOf(i)].color + '">' + esc(S.rivals[G.rivalOf(i)].name) + '</span>' : '<span class="badge">free · ' + money(G.starPrice(i)) + '</span>') + '</td><td>' + learnBadge('star', i) + '</td></tr>';
       }
       body.innerHTML = h + '</table>';
     },
@@ -667,6 +673,23 @@
     hist.forEach((v, k) => { const x = 4 + k / Math.max(1, hist.length - 1) * (W - 8), y = H - 6 - (v - lo) / span * (H - 12); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
     ctx.stroke();
   }
+  // who holds what: you, the rival companies and the free sky
+  function rivalsSection() {
+    const S = G.state, R = G.rivals(), mine = G.d.count, N = SKY.stars.length, held = R.reduce((a, r) => a + r.n, 0), free = N - mine - held;
+    const row = (color, name, n, badges, i) => '<div class="erow' + (i !== undefined ? ' click' : '') + '"' + (i !== undefined ? ' data-act="goto-star" data-i="' + i + '"' : '') + '><span class="dot" style="background:' + color + '"></span><span><b>' + esc(name) + '</b> ' + badges + '</span><span class="muted tiny">' + n + ' · ' + (n / N * 100).toFixed(1) + '%</span><span class="ebar"><i style="width:' + Math.min(100, n / N * 100) + '%;background:' + color + '"></i></span></div>';
+    let h = '<h3>The sky <span class="muted tiny">who holds what</span></h3><div class="empires">';
+    h += row('rgb(143,180,255)', S.corp.name, mine, '<span class="badge cyan">you</span>', S.home);
+    for (const r of R.slice().sort((a, b) => b.n - a.n)) {
+      const bad = [];
+      if (r.out) bad.push('<span class="badge gold">acquired by you</span>');
+      else { if (r.touching) bad.push('<span class="badge">borders you</span>'); if (!r.capitalHeld) bad.push('<span class="badge gold">HQ taken</span>'); }
+      if (r.lost && !r.out) bad.push('<span class="badge">lost ' + r.lost + '</span>');
+      h += row(r.color, r.name, r.n, bad.join(' '), r.n > 0 ? r.home : undefined);
+    }
+    h += row('rgba(150,165,205,.7)', 'Free sky', free, '');
+    h += '</div><div class="muted tiny" style="margin:-4px 0 10px;max-width:640px">Rivals expand at about your own pace (each takes ' + R.map(r => Math.round(r.ratio * 100) + '%').join(', ') + ' as many stars as you add) but never attack you. A star a rival holds costs ' + G.CFG.takeoverMul + '× its price to take over, and flagships and constellation leaders cost the most. Press <b>V</b> to show or hide borders on the map.</div>';
+    return h;
+  }
   const CORP_RENDER = {
     overview(body) {
       const S = G.state, D = G.d, rk = G.rankInfo(), M = S.market;
@@ -677,6 +700,7 @@
       const ch = priceChange();
       h += '<div class="stat-grid"><div class="stat"><b class="gold">' + money(D.totalRate * 3600) + '/h</b><span>revenue</span></div><div class="stat"><b class="cyan">' + fmt(D.totalRes * 3600) + ' RP/h</b><span>research</span></div><div class="stat"><b>' + money(G.valuation()) + '</b><span>valuation</span></div><div class="stat"><b>' + D.buildingCount + '</b><span>buildings</span></div><div class="stat"><b>' + (G.techCount() - 1) + ' / ' + (G.TECHS.length - 1) + '</b><span>technologies</span></div><div class="stat"><b>' + D.slots + '</b><span>fleet slots</span></div><div class="stat"><b>' + Math.round(D.manualShare * 100) + '%</b><span>of your income waits for a visit</span></div><div class="stat"><b class="gold">' + G.FLAGS.filter(f => S.stars[f]).length + ' / ' + G.FLAGS.length + '</b><span>flagships</span></div></div>';
       h += '<div class="pricebox"><div class="row"><b>' + esc(ticker(S.corp.name)) + '</b><span style="font-size:20px;font-weight:600">$' + M.price.toFixed(2) + '</span><span class="' + (ch >= 0 ? 'good' : 'bad') + '">' + (ch >= 0 ? '▲' : '▼') + Math.abs(ch).toFixed(2) + '%</span><span class="grow"></span><span class="muted tiny">all-time high $' + M.hi.toFixed(2) + '</span></div><canvas class="spark" id="spark"></canvas><div class="muted tiny">The share price follows the company’s worth (cash, revenue and colonies) with market noise.</div></div>';
+      h += rivalsSection();
       if (M.kind) { const m = G.MARKETS[M.kind]; h += '<div class="callout"><b>◈ ' + esc(m.name) + '</b> · ' + esc(m.text) + ' · ' + dur(M.remaining) + ' left. <span class="muted">(Market clocks only run while you play.)</span></div>'; }
       else h += '<div class="muted tiny" style="margin-bottom:8px">Markets are calm right now. Booms, bubbles, crunches and contracts come and go while you play.</div>';
       h += '<h3>Headlines</h3>';
@@ -933,19 +957,20 @@
       $('#imp-menu').onchange = e => { if (e.target.files[0]) importFile(e.target.files[0], st => { if (confirm('Replace your current company with this save?')) { closeModal(); beginSession(st, false); } }); };
     },
     guide(body) {
-      body.innerHTML = '<div class="how" style="max-width:740px"><h3 style="margin-top:0">Goal</h3><p>You run a space corporation. Colonise every star on the constellation stick figures, develop every constellation, survey all 110 Messier objects and research every technology. The map is one flat sky that wraps left to right: drag to pan, scroll or pinch to zoom.</p>' +
+      body.innerHTML = '<div class="how" style="max-width:740px"><h3 style="margin-top:0">Goal</h3><p>You run a space corporation. Colonise every star on the constellation stick figures, develop every constellation, survey all 110 Messier objects and research every technology. The map is one flat sky that wraps both ways: drag to pan, scroll or pinch to zoom.</p>' +
         '<h3>Core loop</h3><ul><li><b class="gold">Cash</b> is earned by every colony. It piles up in that colony’s storage: <b>tap the colony and Collect revenue</b> (storage stops filling when full, so visit often; orange-red stars hold the most).</li>' +
-        '<li><b>Colonise</b> a new star: select an uncolonised star next to your territory (ringed in blue) and send a colony ship. Charters are paid up front and sail as soon as a ship is free, even while you are away. Every star has a <b>spectral class</b> (O B A F G K M, from its colour) and a <b>brightness</b>, and each gives the colony a bonus: hot blue stars pay more, white ones research, orange and red ones store more, and the brightest ones are beacons for routes and ships.</li>' +
+        '<li><b>Colonise</b> a new star: select an uncolonised star next to your territory (ringed in blue) and send a colony ship. <b>Prices follow importance</b>: ordinary stars are cheap, so the opening is quick, but the 20 flagships and each constellation’s lead star (its alpha, or its brightest) cost several times more. Charters are paid up front and sail as soon as a ship is free, even while you are away. Every star has a <b>spectral class</b> (O B A F G K M, from its colour) and a <b>brightness</b>, and each gives the colony a bonus: hot blue stars pay more, white ones research, orange and red ones store more, and the brightest ones are beacons for routes and ships.</li>' +
         '<li><b>Develop</b> colonies with Industry (more revenue), Logistics (faster ships, stronger routes, more fleet slots) and R&amp;D (research points ◉).</li>' +
         '<li><b>Trade routes</b>: neighbouring colonies boost each other, more when their star colours differ. Upgrade routes for stronger bonuses and faster ships. The map wraps in both directions: leave over the north pole and you arrive from the south.</li>' +
         '<li><b>Flagships</b>: the 20 named stars are sector offices. Colonies around one remit 25% of their revenue to it, its vault holds a day, it <b>never banks itself</b> and collecting there pays a dividend premium. Research the <b>Telegraph</b>, <b>Electronic Funds Transfer</b> and <b>Digital Payments</b> and ordinary colonies bank up to 80% of their cash automatically; the flagships still need you, at every stage of the game.</li></ul>' +
         '<h3>Technology and buildings</h3><p>Open <b>Corporation → Technology</b> to research human technology in real time: the telescope, rockets, computers, solar cells, space stations, fusion, space elevators, Dyson swarms and warp drives. Technology unlocks <b>buildings</b> and gives company-wide bonuses. Every three development levels on a colony open a building slot (the rings around the star; each building shows as a little satellite). Revenue buildings such as Solar Farms and Fusion Plants cost what they earn back in a day or two; a <b>Clearing House</b> banks the revenue of a whole region automatically; a <b>Space Station</b> adds slots.</p>' +
+        '<h3>Rivals and borders</h3><p>Three rival companies start on far-away flagships and expand at about your own pace: every star you add earns each of them a share of one (90%, 75% and 60%). They never attack you or take what is yours. The map tints each empire’s ground and draws its <b>borders</b>; press <b>V</b> to hide them. A star a rival holds can be <b>taken over</b> once it touches your territory (ringed with a turning dashed circle; <b>X</b> finds them): it costs 2.5 times its normal price, so flagships and lead stars are dear. When the free sky runs out, the rest of the sky is won by takeover, and a rival that loses its last star is acquired.</p>' +
         '<h3>The company</h3><p>As you grow you are promoted from Startup to Cosmic Monopoly. Your share price follows the company’s worth, and random <b>market conditions</b> (booms, tech bubbles, credit crunches, government contracts) come and go while you play.</p>' +
         '<h3>Messier objects</h3><p>Send a <b>survey mission</b> to a Messier object near one of your colonies. Each type gives a bonus (globulars: fleet slots, open clusters: revenue, nebulae: research, galaxies: speed) and is stamped into the catalogue with its photograph.</p>' +
         '<h3>Constellations</h3><p>A <b>developed</b> constellation (every star colonised, 3+ levels each) is stamped in the Codex and unlocks one-tap collection there. <b>Mastered</b> at 9+ levels each.</p>' +
         '<h3>Sky School</h3><p>Five-question rounds that name constellations from their figures, mark stars, tell colours and brightness, identify Messier objects by photograph, number, name and type, and cover the Olympiad Academy. Rewards are modest. Everything runs on spaced repetition: an item needs 10 correct answers, spaced further and further apart, before it is <b>learned</b>. Track it all under <b>Codex → Learning</b>.</p>' +
         '<h3>Olympiad Academy</h3><p>The astronomy-olympiad syllabus in ten topics (sky and time, orbital mechanics, telescopes and optics, light, stars, magnitudes and distances, stellar evolution, the Solar System and exoplanets, galaxies and cosmology): facts, <b>diagrams</b> of telescope designs, orbits and the H–R diagram, and numerical problems with fresh numbers every time. Practise in Sky School; open <b>Corporation → Academy</b> for each topic’s level, formula sheet and diagrams. Mastering a topic raises it through three levels, and every level is a <b>permanent</b> bonus for the whole company.</p>' +
-        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a <b>story</b> of more than 300 goals in fifteen chapters. The list offers the next goal of every chapter; tap a chapter to see all that is left in it. Rewards are worth minutes of your revenue.</p>' +
+        '<h3>Quests</h3><p>Three repeatable <b>contracts</b> plus a <b>story</b> of more than 340 goals in sixteen chapters. The list offers the next goal of every chapter; tap a chapter to see all that is left in it. Rewards are worth minutes of your revenue.</p>' +
         '<h3>Comets and novae</h3><p>Now and then a comet or nova cuts some of your trade routes. Press <b>Redraw routes</b> and tap two stars to rebuild each missing line from memory. Correct lines pay out; wrong guesses cost accuracy; hints work but pay a quarter. If you ignore it the routes drift back by themselves. Event clocks only run while the game is open, so nothing expires while you are away.</p>' +
         '<h3>Petitions</h3><p>Colonies sometimes ask for an upgrade, an expansion or a visit, and reward you for answering. Nothing in this game dims, decays or is taken from you.</p>' +
         '<h3 class="k-only">Keyboard</h3><p class="k-only">Every window and most actions have a key, shown on the buttons. <b>Space</b> expands (sends a colony ship or survey mission), <b>C</b> opens the Codex, <b>1–9</b> build in the selected colony and <b>R</b> collects. Press <b>?</b> for the full list (Menu → Keys).</p></div>';
@@ -980,6 +1005,8 @@
     'upgrade-route': el => { const r = G.upgradeRoute(+el.dataset.e); toast(r.msg, r.ok ? 'good' : 'bad'); },
     'quest-claim': el => { const r = QU.claim(el.dataset.id); toast(r.ok ? 'Quest reward: +' + money(r.reward.cash) + '  +' + rp(r.reward.research) : r.msg, r.ok ? 'gold' : 'bad'); },
     'quest-reroll': el => { QU.rerollContract(el.dataset.id); },
+    'goto-takeover': () => { const cand = G.takeoverTargets().filter(t => G.canLaunchTo(t).ok); if (cand.length) focusStar(cand[0]); },
+    'toggle-borders': () => { ui.borders = !ui.borders; try { localStorage.setItem('firmament.borders', ui.borders ? '1' : '0'); } catch (e) { /* private window */ } const b = $('#borders-btn'); if (b) b.classList.toggle('off', !ui.borders); toast(ui.borders ? 'Empire borders shown.' : 'Empire borders hidden.', 'good'); },
     'quest-chapter': el => { ui.questChapter = el.dataset.chapter || null; },
     'quest-claim-all': () => {
       const L = QU.list(); let cash = 0, res = 0, n = 0;
@@ -1062,7 +1089,8 @@
     ['Expand', [
       [['Space'], 'Send a colony ship to the selected star, survey the selected Messier object, or otherwise send a ship to the best-paying new star (next to the selected colony if one is selected)'],
       [['Shift', 'Space'], 'Send a ship to the best new star for every idle ship'],
-      [['N'], 'Next new star to colonise (Shift+N: previous)'],
+      [['N'], 'Next free star to colonise (Shift+N: previous)'],
+      [['X'], 'Next rival star next to your territory, to take over (Shift+X: previous)'],
       [['M'], 'Next Messier object in reach to survey (Shift+M: previous)'],
       [['G'], 'Next flagship or colony with cash waiting, the most first (Shift+G: previous)'],
       [['P'], 'Next petition'],
@@ -1078,6 +1106,7 @@
     ['Map', [
       [['←', '↑', '↓', '→'], 'Pan (hold Shift to go faster)'],
       [['+', '−'], 'Zoom'],
+      [['V'], 'Show or hide empire borders (yours and the rivals’)'],
       [['E'], 'Redraw the routes cut by a comet or nova (press again, or Esc, to finish)'],
     ]],
     ['Inside windows', [
@@ -1136,7 +1165,7 @@
     const sent = [];
     do {
       const list = G.expansionTargets(near);
-      if (!list.length) { if (!sent.length) toast('No new star to colonise: every star in reach is yours or has a ship bound for it.', 'bad'); break; }
+      if (!list.length) { if (!sent.length) toast('No free star to colonise: every one in reach is yours, a rival’s or has a ship bound for it.' + (ui.takeover.size ? ' Rival stars next to you can be taken over.' : ''), 'bad'); break; }
       let t = list.find(x => sailsNow(x) && G.canLaunchTo(x).ok);
       if (t === undefined && !all) t = list.find(x => G.canLaunchTo(x).ok); // one press may queue a charter along a chain
       if (t === undefined) { if (!sent.length) toast(G.canLaunchTo(list[0]).msg, 'bad'); break; }
@@ -1244,7 +1273,9 @@
     }
     switch (key) {
       case ' ': expand(shift); return true;
-      case 'n': { const t = cycleList(G.expansionTargets(), sel && sel.type === 'star' ? sel.i : -1, shift ? -1 : 1); if (t < 0) toast('No new star to colonise: every star in reach is yours or has a ship bound for it.', 'bad'); else focusStar(t); return true; }
+      case 'n': { const t = cycleList(G.expansionTargets(), sel && sel.type === 'star' ? sel.i : -1, shift ? -1 : 1); if (t < 0) toast('No new star to colonise: every free star in reach has a ship bound for it' + (ui.takeover.size ? '. Rival stars next to you can be taken over (X).' : '.'), 'bad'); else focusStar(t); return true; }
+      case 'x': { const t = cycleList(G.takeoverTargets(), sel && sel.type === 'star' ? sel.i : -1, shift ? -1 : 1); if (t < 0) toast('No rival holds a star next to your territory yet.', 'bad'); else focusStar(t); return true; }
+      case 'v': runAct('toggle-borders'); return true;
       case 'm': { const m = cycleList(G.messierTargets(), sel && sel.type === 'messier' ? sel.i : -1, shift ? -1 : 1); if (m < 0) toast('No Messier object is in reach: colonise a star near one first.', 'bad'); else focusMessier(m); return true; }
       case 'g': { const t = cycleList(G.attention().map(a => a.star), colony, shift ? -1 : 1); if (t < 0) toast('No colony has full storage right now.', 'bad'); else focusStar(t); return true; }
       case 'p': { const t = cycleList(S.petitions.map(p => p.star), colony, shift ? -1 : 1); if (t < 0) toast('No colony has a petition right now.', 'bad'); else focusStar(t); return true; }
@@ -1299,7 +1330,7 @@
     const L = G.state.log;
     for (let k = Math.max(ui.lastLog, L.length - 4); k < L.length; k++) {
       const l = L[k];
-      if (['claim', 'messier', 'dev', 'event', 'petition', 'event-done', 'tech', 'rank', 'market'].includes(l.kind) && k > 0) toast(l.text, l.kind === 'event' ? 'bad' : 'gold');
+      if (['claim', 'messier', 'dev', 'event', 'petition', 'event-done', 'tech', 'rank', 'market', 'rival'].includes(l.kind) && k > 0) toast(l.text, l.kind === 'event' ? 'bad' : 'gold');
     }
     if (L.length !== ui.lastLog) scheduleSave();
     ui.lastLog = L.length;
@@ -1314,7 +1345,7 @@
       else G.tick(Math.min(gap, 0.5), true);
       sec += gap;
       if (ui.flashes.length && now - ui.flashes[0].t > 1000) ui.flashes.shift();
-      ui.frontier = G.frontier();
+      ui.frontier = G.frontier(); ui.takeover = new Set(G.takeoverTargets());
       if (ui.held.size && !ui.modal) { // arrow keys pan, + and - zoom, smoothly for as long as they are held
         const dt = Math.min(0.1, gap), acts = new Set(ui.held.values()), sp = (ui.fast ? 1600 : 650) * dt;
         const dx = (acts.has('left') ? 1 : 0) - (acts.has('right') ? 1 : 0), dy = (acts.has('up') ? 1 : 0) - (acts.has('down') ? 1 : 0), z = (acts.has('in') ? 1 : 0) - (acts.has('out') ? 1 : 0);
@@ -1329,7 +1360,7 @@
         if (ui.modal && ((ui.modal.live && !(ui.modal.id === 'corp' && ui.tab === 'academy')) || (ui.modal.tabs && ui.tab === 'chron')) && !typing && !$('#modal-body :active')) renderModal();
       }
       pumpLog();
-    } else sky.render(now, { sel: null, redraw: null, flashes: [], frontier: new Set(), hint: false, _idle: true });
+    } else sky.render(now, { sel: null, redraw: null, flashes: [], frontier: new Set(), takeover: new Set(), borders: true, hint: false, _idle: true });
     requestAnimationFrame(frame);
   }
   // where a selected star should land on screen so the side panel (desktop) or bottom sheet (phone) does not cover it

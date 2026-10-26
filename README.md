@@ -8,8 +8,9 @@ directions**: leave at the right and you come back on the left, leave over the n
 arrive from the south pole (Miller cylindrical projection, with a faint graticule and the ecliptic). Every
 star on the 88 constellation stick figures is a possible colony (757 of them, with their real positions,
 brightness and colour). The figure lines are your trade routes; short "hyperlanes" join neighbouring
-constellations. All 110 Messier objects are survey sites. It is a solo, PvE game with no decay: nothing is
-ever taken from you, and no star has special powers.
+constellations. All 110 Messier objects are survey sites. It is a solo, PvE game with no decay: three rival
+companies expand across the sky at about your own pace, but they never attack, nothing is ever taken from you,
+and no star has special powers.
 
 Only the 20 most important stars carry proper names (the 19 brightest named stars, from Sirius to Deneb,
 plus Polaris). Every other star is shown by its official designation: Bayer letter (β Ori), Flamsteed number
@@ -21,6 +22,18 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
   Storage caps out (orange-red stars hold the most), which is the reason to keep coming back.
 - **Colonise** neighbouring stars by sending colony ships along routes. Travel is slow (by real angular
   distance). Charters are paid up front and queue, so ships keep chaining outward even while you are away.
+- **Prices follow importance.** A star costs the going rate (which rises with the size of your company) times a
+  multiplier: **ordinary stars ×0.45** (cheap, so the opening is quick), bright (mag 2 to 3) ×0.9, brilliant
+  (mag 1 to 2) ×1.5, each constellation's **lead star** (its alpha, or its brightest) ×3, and the 20 **flagships**
+  ×6. Pressing Space buys the best revenue for the money, so the dear stars are deliberate purchases.
+- **Rival companies.** Three rivals start on far-apart flagships and expand at **about your own pace**: every star
+  you add earns each of them a share of one (90%, 75% and 60%), they favour lead stars and flagships, they only
+  grow while you do, and they **never attack you or take what is yours**. The map tints each empire's ground and
+  draws its **borders** (a Voronoi territory around every held star, limited to a reach; toggle with `V` or the ◩
+  button). A star a rival holds can be **taken over** once it touches your territory (a turning dashed ring marks
+  them; `X` jumps to the next): it costs **2.5×** its normal price, so the rivals' flagships and lead stars are
+  dear. Once the free sky is gone the rest is won by takeover, and a rival that loses its last star is acquired.
+  Corporation → Overview shows who holds what.
 - **Develop** colonies: *Industry* (more revenue), *Logistics* (faster ships, stronger routes, more fleet
   slots), *R&D* (produces **research points ◉**).
 - **Stars and their bonuses**: every star has a **spectral class** (O B A F G K M, estimated from its colour, with
@@ -61,9 +74,9 @@ plus Polaris). Every other star is shown by its official designation: Bayer lett
 - **Developed constellations**: colonise every star and develop each to ≥3 levels. It is stamped in the Codex
   (with a page per constellation: chart, lore, stars, neighbours, your own notes) and unlocks one-tap
   collection. **Mastered** at ≥9 levels each.
-- **Quests**: three repeatable *contracts* plus a story of more than 300 goals in fifteen chapters (Expansion,
-  Revenue, Corporation, Development, Technology, Buildings, Routes, Flagships, Spectra, Messier, Landmarks, Skies,
-  Petitions, Sky School and the Olympiad Academy). The list offers the next goal of every chapter; tap a chapter
+- **Quests**: three repeatable *contracts* plus a story of more than 340 goals in sixteen chapters (Expansion,
+  Revenue, Corporation, Rivals, Development, Technology, Buildings, Routes, Flagships, Spectra, Messier, Landmarks,
+  Skies, Petitions, Sky School and the Olympiad Academy). The list offers the next goal of every chapter; tap a chapter
   to see everything left in it. Chapters reach from "colonise 2 stars" to "Earn $100B", "all 757 stars", every
   spectral class and brightness tier, each building and technology, the nine Messier showpieces, famous
   asterisms (Orion's Belt, the Summer Triangle, the Southern Cross, the Teapot, the Northern Cross, the Winter
@@ -116,7 +129,9 @@ Keys are ignored while you type in a text box, and window keys toggle (press aga
 | `Esc` | Close the window, finish redrawing, deselect; with nothing to close it opens the menu |
 | `Space` | **Expand**: send a colony ship to the selected star, survey the selected Messier object (then study it in depth), or otherwise send a ship to the best-paying new star (next to the selected colony if one is selected). It never queues a charter on its own: with every ship out it asks you to pick a star |
 | `Shift` `Space` | Send a ship to the best new star for every idle ship |
-| `N` / `M` / `G` / `P` | Jump to the next new star to colonise / Messier object to survey / flagship or colony with cash waiting (flagships first) / petition. `Shift` goes backwards |
+| `N` / `M` / `G` / `P` | Jump to the next free star to colonise / Messier object to survey / flagship or colony with cash waiting (flagships first) / petition. `Shift` goes backwards |
+| `X` | Jump to the next rival star next to your territory, to take over (Space then sends the takeover fleet) |
+| `V` | Show or hide the empire borders |
 | `H` | Headquarters (while redrawing: show hints) |
 | `R` | Collect revenue at the selected colony (`Shift` `R`: the whole constellation once developed) |
 | `I` `L` `D` | Develop Industry, Logistics, R&D at the selected colony |
@@ -131,9 +146,10 @@ Keys are ignored while you type in a text box, and window keys toggle (press aga
 ## Pace
 
 Slowed down by about 2× since the first version, with quizzes nerfed. Roughly: a casual player visiting three
-times a day has colonised all 757 stars in about three weeks; once a day takes around six. Researching the
-whole tree, filling the building slots, mastering all 88 constellations, surveying the Messier catalogue and
-learning every item in Sky School take considerably longer.
+times a day fills the free sky within about a week (the rivals keep up, so the free stars run out early), has
+taken over the rest by about week five, and once a day takes around ten weeks; a min-maxing player finishes in
+under three. Researching the whole tree, filling the building slots, mastering all 88 constellations, surveying
+the Messier catalogue and learning every item in Sky School take considerably longer.
 
 ## Running and developing
 
@@ -141,7 +157,7 @@ It is a static site with no build step for the game itself.
 
 ```sh
 npm run serve        # http://localhost:8000
-npm test             # engine tests (data, economy, buildings, tech, events, saves, pacing) and Academy tests (every card, every generator checked against an independent calculation, every diagram drawn, levels and perks)
+npm test             # engine tests (data, economy, prices, rivals and takeovers, buildings, tech, events, quests, saves, pacing), Academy tests (every card, every generator checked against an independent calculation, every diagram drawn, levels and perks) and territory geometry tests
 ```
 
 | File | Purpose |
@@ -155,7 +171,8 @@ npm test             # engine tests (data, economy, buildings, tech, events, sav
 | `js/quests.js` | Quests: story chain and repeatable contracts (progress derived from game state). |
 | `js/pics.js` | Messier pictures: loads `img/messier/` photos, with procedural illustrations as placeholder/fallback. |
 | `img/messier/` | 110 resized Messier photographs (provenance in THIRD_PARTY.md). |
-| `js/sky.js` | Flat wrapping map renderer (Miller projection), pan/zoom/pick, codex mini-charts. |
+| `js/territory.js` | Territory geometry (no DOM): the ground nearest to each star on the wrapping map as a convex polygon with labelled edges, for empire fills and borders. |
+| `js/sky.js` | Flat wrapping map renderer (Miller projection), empire ground and borders, pan/zoom/pick, codex mini-charts. |
 | `js/ui.js` | Start screen, HUD, panels, corporation, Codex, redraw mode, keyboard shortcuts, saves, main loop. |
 | `js/data.js` | Generated sky data (do not edit by hand). |
 | `data/lore.json` | Constellation and Messier text, Messier→constellation table. |

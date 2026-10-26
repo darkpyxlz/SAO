@@ -9,7 +9,7 @@
 
   const { BUILDINGS, BUILDING_MAX, BUILD_LEVEL_MUL, TECHS, TECH_BY_ID, RANKS, MARKETS } = Corp;
   const RAD = Math.PI / 180;
-  const SAVE_VERSION = 5;
+  const SAVE_VERSION = 6;
   const TRACKS = ['r', 'b', 'o'];
   const TRACK_INFO = {
     r: { name: 'Industry', short: 'Ind', desc: 'More revenue from this colony.', base: 50, grow: 2.0 },
@@ -49,7 +49,14 @@
     // it never auto-banks, and collecting there pays a premium. This is what keeps you coming back to the important stars.
     royaltyShare: 0.25, flagshipCapH: 24, flagshipPremium: 0.2, flagshipReadyH: 4,
     marketFirstDelay: [600, 1200], marketGap: [1200, 2400], priceStepSecs: 10,
+    // prices: a star costs the going rate times a multiplier for how important it is (see starRank), and a star a rival holds costs
+    // more again to take over. Ordinary stars are cheap, so the opening is quick; flagships and constellation leaders are not.
+    priceDim: 0.45, priceBright: 0.9, priceBrilliant: 1.5, priceLead: 3, priceFlagship: 6, takeoverMul: 2.5,
+    // rival companies expand at a fixed share of YOUR pace: every colony you add earns each rival `ratio` colonies of credit, and a
+    // rival spends credit one star at a time. They hold the stars they take; you can take them over, but they never attack you.
+    rivalCount: 3, rivalRatios: [0.9, 0.75, 0.6], rivalGap: [5, 25], rivalCreditCap: 10, rivalRetry: 45, rivalSafeHops: 2,
   };
+  const RIVAL_COLORS = ['#ff8aa8', '#7fe0a6', '#c9a0ff', '#ffb06a'];
   const ROUTE_MAX = 3;
 
   const PERK_LABEL = {
@@ -96,6 +103,18 @@
     const FLAGS = SKY.stars.map((st, i) => i).filter(i => SKY.stars[i][7]);
     const isFlag = new Uint8Array(N); FLAGS.forEach(i => { isFlag[i] = 1; });
     const sectorOrder = SKY.stars.map((st, i) => FLAGS.filter(f => f !== i).map(f => ({ f, d: sepDeg(st, SKY.stars[f]) })).sort((x, y) => x.d - y.d || x.f - y.f).map(x => x.f));
+    // how important each star is, for prices: the 20 named flagships, then each constellation's lead star (its alpha, or failing that its
+    // brightest), then everything else by brightness tier
+    const isLead = new Uint8Array(N);
+    SKY.consts.forEach(c => { let b = -1; for (const i of c.stars) if (b < 0 || SKY.stars[i][3] < SKY.stars[b][3]) b = i; if (b >= 0) isLead[b] = 1; });
+    SKY.stars.forEach((st, i) => { if (/^\u03b1/.test(st[6])) isLead[i] = 1; });
+    const STAR_RANKS = {
+      flagship: { label: 'Flagship', price: 'priceFlagship', weight: 3 }, lead: { label: 'Lead star', price: 'priceLead', weight: 2 },
+      brilliant: { label: 'Brilliant star', price: 'priceBrilliant', weight: 1.4 }, bright: { label: 'Bright star', price: 'priceBright', weight: 1.1 },
+      ordinary: { label: 'Ordinary star', price: 'priceDim', weight: 1 },
+    };
+    const RANK_OF = SKY.stars.map((st, i) => (isFlag[i] ? 'flagship' : isLead[i] ? 'lead' : st[3] < 2 ? 'brilliant' : st[3] < 3 ? 'bright' : 'ordinary'));
+    const priceMul = i => CFG[STAR_RANKS[RANK_OF[i]].price];
     // constellations that touch each other (for the codex)
     const consNeighbours = Array.from({ length: NC }, () => new Set());
     SKY.edges.forEach(e => {
@@ -108,7 +127,7 @@
     SKY.messier.forEach((m, i) => m.links.forEach(s => messierFrom[s].push(i)));
 
 
-    function blankStats() { return { collected: 0, auto: 0, claimed: 0, launched: 0, upgrades: 0, eventsDone: 0, perfect: 0, restoredRoutes: 0, petitionsDone: 0, collects: 0, routeUps: 0, built: 0, buildUps: 0, techs: 0, demolished: 0, marketEvents: 0, flagCollects: 0, flagCash: 0 }; }
+    function blankStats() { return { collected: 0, auto: 0, claimed: 0, launched: 0, upgrades: 0, eventsDone: 0, perfect: 0, restoredRoutes: 0, petitionsDone: 0, collects: 0, routeUps: 0, built: 0, buildUps: 0, techs: 0, demolished: 0, marketEvents: 0, flagCollects: 0, flagCash: 0, takeovers: 0, flagTakeovers: 0, capitals: 0, acquired: 0 }; }
     function blankQuiz() { return { const: {}, star: {}, messier: {}, astro: {}, stats: { answered: 0, correct: 0, rounds: 0, perfect: 0, bestStreak: 0 } }; }
     function blankMarket() { return { kind: null, remaining: 0, nextIn: rand(CFG.marketFirstDelay), price: 10, hi: 10, hist: [10], priceTimer: 0 }; }
     function blankState(home, corpName) {
@@ -118,6 +137,7 @@
         corp: { name: corpName || Corp.defaultCompanyName(SKY.stars[home][6]), founded: nowFn(), rank: 0 },
         tech: { done: { telescope: nowFn() }, active: null },
         market: blankMarket(),
+        rivals: [], owner: {}, rseed: 0,
         stars: {}, fleets: [], orders: [], messier: {}, devConst: {}, masterConst: {}, buildings: {}, routeLvl: {}, quests: { claimed: {}, contracts: [], seq: 0 },
         events: [], eventTimer: rand(CFG.eventFirstDelay), petitions: [], petitionTimer: rand(CFG.petitionGap),
         notes: {}, quiz: blankQuiz(), academy: { lvl: {} }, log: [], evSeq: 0, petitionSeq: 0, fleetSeq: 0, orderSeq: 0,
@@ -136,6 +156,7 @@
       S = blankState(home, corpName && String(corpName).trim().slice(0, 32));
       S.stars[home] = { t: nowFn(), s: 0, i: 0, r: 0, b: 0, o: 0 };
       log(S.corp.name + ' is founded. Headquarters: ' + SKY.stars[home][6] + ' in ' + SKY.consts[SKY.stars[home][5]].name + '.', 'claim');
+      initRivals();
       recalc();
       return S;
     }
@@ -174,6 +195,7 @@
         if (state.stats) delete state.stats.lanes;
         state.version = 5;
       }
+      if (state.version === 5) state.version = 6; // v6 adds rival companies; load() founds them to match how far you have come
       return state;
     }
     function load(state) {
@@ -191,7 +213,12 @@
       if (!S.tech.done) S.tech.done = {};
       S.tech.done.telescope = S.tech.done.telescope || nowFn();
       S.market = Object.assign(blankMarket(), S.market);
+      S.owner = S.owner || {};
+      const hadRivals = Array.isArray(S.rivals) && S.rivals.length > 0;
+      if (!hadRivals) S.rivals = [];
       recalc();
+      if (!hadRivals) { initRivals(); recalc(); catchUpRivals(); } // an older save: the rivals have been growing at your pace all along
+      else for (const r of S.rivals) r.stuck = false;
       if (S.laneRefund) { // saves from before the retirement of trade lanes
         const back = S.laneRefund * Math.ceil(claimCost() * 0.8);
         S.cash += back; log('Trade lanes were retired. Your ' + S.laneRefund + ' lane' + (S.laneRefund === 1 ? '' : 's') + ' were refunded: $' + fmt(back) + '.', 'info');
@@ -250,6 +277,10 @@
     }
 
     function recalc() {
+      for (const k of Object.keys(S.owner)) if (S.stars[k] || !S.rivals[S.owner[k]]) delete S.owner[k]; // the books stay straight whatever changed hands
+      const held = S.rivals.map(() => 0);
+      for (const k of Object.keys(S.owner)) held[S.owner[k]]++;
+      S.rivals.forEach((r, k) => { r.n = held[k]; });
       const claimed = claimedList();
       const P = perks();
       const M = marketMods();
@@ -369,6 +400,117 @@
       return result(true, 'Renamed to ' + n + '.');
     }
 
+    // ---- rival companies: they hold the stars they take, expand at a share of YOUR pace, and can be taken over (they never attack)
+    function rrand() { // the rivals' own random stream (kept in the save), so they never disturb anything else
+      S.rseed = (S.rseed + 0x6D2B79F5) >>> 0;
+      let t = S.rseed;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+    const rrange = ([a, b]) => a + rrand() * (b - a);
+    function initRivals() { // each rival starts on a flagship as far as possible from every other headquarters
+      S.rseed = (Math.imul(S.home + 1, 2654435761) + Math.floor((S.created || 0) % 4294967296)) >>> 0;
+      S.owner = {}; S.rivals = [];
+      const capitals = [S.home], isFree = i => !S.stars[i] && S.owner[i] === undefined;
+      let pool = FLAGS.filter(f => f !== S.home && isFree(f));
+      for (let k = 0; k < CFG.rivalCount; k++) {
+        if (!pool.length) pool = SKY.stars.map((st, i) => i).filter(i => isFree(i) && isLead[i] && !capitals.includes(i));
+        if (!pool.length) break;
+        let best = pool[0], bd = -1;
+        for (const f of pool) { const d = Math.min(...capitals.map(c => sepDeg(SKY.stars[f], SKY.stars[c]))); if (d > bd + 1e-9) { bd = d; best = f; } }
+        pool = pool.filter(f => f !== best); capitals.push(best);
+        S.owner[best] = k;
+        S.rivals.push({ id: k, name: Corp.defaultCompanyName(SKY.stars[best][6]), color: RIVAL_COLORS[k % RIVAL_COLORS.length], home: best, ratio: CFG.rivalRatios[k % CFG.rivalRatios.length], credit: 0.4, cool: 0, n: 1, lost: 0, retries: 0, contact: false, stuck: false });
+      }
+    }
+    // one star for rival r: next to what it holds (a lead or flagship is likelier), else the nearest free star by route. 0 = took one,
+    // 1 = nothing it may take right now, 2 = no free star is left anywhere
+    function rivalClaim(r) {
+      const pend = targetsPending(), open = t => !S.stars[t] && S.owner[t] === undefined && !pend.has(t);
+      const touch = new Map(), mine = [];
+      for (const key of Object.keys(S.owner)) {
+        if (S.owner[key] !== r.id) continue;
+        mine.push(+key);
+        for (const n of adj[+key]) if (open(n.to)) touch.set(n.to, (touch.get(n.to) || 0) + 1);
+      }
+      let pick = -1;
+      if (touch.size) {
+        const items = [...touch].map(([t, c]) => [t, STAR_RANKS[RANK_OF[t]].weight * (1 + 0.3 * (c - 1))]);
+        let x = rrand() * items.reduce((a, it) => a + it[1], 0);
+        pick = items[items.length - 1][0];
+        for (const [t, w] of items) { x -= w; if (x <= 0) { pick = t; break; } }
+      } else if (mine.length) {
+        const near = new Set(claimedList()); let ring = [...near];
+        for (let d = 0; d < CFG.rivalSafeHops; d++) { const nx = []; for (const u of ring) for (const n of adj[u]) if (!near.has(n.to)) { near.add(n.to); nx.push(n.to); } ring = nx; }
+        const seen = new Set(mine); let layer = mine;
+        while (layer.length && pick < 0) {
+          const nx = [];
+          for (const u of layer) for (const n of adj[u]) if (!seen.has(n.to)) { seen.add(n.to); nx.push(n.to); }
+          const cand = nx.filter(t => open(t) && !near.has(t));
+          if (cand.length) pick = cand[Math.floor(rrand() * cand.length)];
+          layer = nx;
+        }
+      }
+      if (pick < 0) return SKY.stars.some((st, i) => !S.stars[i] && S.owner[i] === undefined) ? 1 : 2;
+      S.owner[pick] = r.id; r.n++; r.retries = 0;
+      const rank = RANK_OF[pick], nm = SKY.stars[pick][6];
+      if (rank === 'flagship') log(r.name + ' has colonised the flagship ' + nm + '.', 'rival');
+      else if (rank === 'lead') log(r.name + ' has colonised ' + nm + ' (' + SKY.consts[SKY.stars[pick][5]].name + ').', 'rival-note');
+      if (!r.contact && adj[pick].some(n => S.stars[n.to])) { r.contact = true; log('Your territory now touches ' + r.name + '.', 'rival'); }
+      return 0;
+    }
+    function rivalsEarn() { // you added a colony: every rival earns a share of one
+      for (const r of S.rivals) {
+        if (r.n <= 0) continue;
+        const before = r.credit;
+        r.credit = Math.min(CFG.rivalCreditCap, r.credit + r.ratio * (0.6 + 0.8 * rrand()));
+        if (before < 1 && r.credit >= 1) r.cool = Math.max(r.cool || 0, rrange(CFG.rivalGap));
+      }
+    }
+    const rivalReady = r => r.n > 0 && !r.stuck && r.credit >= 1;
+    function rivalsAct() { // rivals with credit and an expired timer take a star
+      for (const r of S.rivals) {
+        if (!rivalReady(r) || r.cool > 1e-9) continue;
+        const res = rivalClaim(r);
+        if (res === 0) { r.credit -= 1; r.cool = rrange(CFG.rivalGap); }
+        else if (res === 1) r.cool = CFG.rivalRetry * Math.min(80, 1 + (r.retries = (r.retries || 0) + 1));
+        else r.stuck = true;
+      }
+    }
+    function catchUpRivals() { // an older save: grow every rival to its share of how far you have come
+      const want = Math.max(0, D.count - 1);
+      for (const r of S.rivals) {
+        for (let guard = 0; r.n < Math.round(r.ratio * want) && guard < 2000; guard++) if (rivalClaim(r) !== 0) break;
+        r.credit = 0;
+      }
+      recalc();
+    }
+    function takeOver(i, k) { // the star you just reached was a rival's
+      const r = S.rivals[k];
+      delete S.owner[i]; r.n = Math.max(0, r.n - 1); r.lost = (r.lost || 0) + 1;
+      S.stats.takeovers++;
+      if (RANK_OF[i] === 'flagship') S.stats.flagTakeovers++;
+      const capital = r.home === i;
+      if (capital) S.stats.capitals++;
+      log('Took over ' + SKY.stars[i][6] + ' (' + SKY.consts[SKY.stars[i][5]].name + ') from ' + r.name + (capital ? ': their headquarters!' : '.'), 'claim');
+      if (r.n === 0) { S.stats.acquired++; log(r.name + ' has lost its last star and is acquired by ' + S.corp.name + '.', 'rank'); }
+    }
+    function rivalsMeet(i) { // your new colony touches a rival's: say so, once
+      for (const n of adj[i]) { const r = S.rivals[S.owner[n.to]]; if (r && !r.contact) { r.contact = true; log('Your territory now touches ' + r.name + '.', 'rival'); } }
+    }
+    const rivalOf = i => (S.stars[i] || S.owner[i] === undefined ? -1 : S.owner[i]);
+    function rivals() { // a summary for the screens
+      const touching = new Set();
+      for (const key of Object.keys(S.owner)) if (adj[+key].some(n => S.stars[n.to])) touching.add(S.owner[key]);
+      return S.rivals.map(r => ({ id: r.id, name: r.name, color: r.color, home: r.home, n: r.n, share: r.n / N, lost: r.lost || 0, ratio: r.ratio, out: r.n === 0, touching: touching.has(r.id), capitalHeld: S.owner[r.home] === r.id }));
+    }
+
+    // ---- what a star costs: the going rate times its importance (flagships and constellation leaders are dear, ordinary stars cheap),
+    // times a takeover premium if a rival holds it
+    const starRank = i => ({ kind: RANK_OF[i], label: STAR_RANKS[RANK_OF[i]].label, mul: priceMul(i) });
+    const starPrice = i => Math.ceil(claimCost() * priceMul(i) * (rivalOf(i) >= 0 ? CFG.takeoverMul : 1));
+
     // ---- costs
     const costMul = () => 1 - Math.min(0.5, D.P.cost + D.M.cost);
     function inFlightClaims() { return S.fleets.filter(f => f.kind === 's').length + S.orders.length; }
@@ -412,21 +554,21 @@
       if (S.orders.length >= CFG.orderMax) return result(false, 'The charter queue is full.');
       const reach = adj[target].some(n => S.stars[n.to] || pend.has(n.to));
       if (!reach) return result(false, 'No colony is connected to this star.');
-      if (S.cash < claimCost()) return result(false, 'Not enough cash.');
+      if (S.cash < starPrice(target)) return result(false, 'Not enough cash.');
       return result(true);
     }
     // Pay now, fly when a slot is free and a claimed star touches the target (so orders can chain outward, even offline).
     function launch(target) {
       const chk = canLaunchTo(target);
       if (!chk.ok) return chk;
-      const paid = claimCost();
+      const paid = starPrice(target), takeover = rivalOf(target) >= 0;
       S.cash -= paid;
       S.orders.push({ id: ++S.orderSeq, to: target, paid });
       dispatch();
       const flying = S.fleets.find(f => f.kind === 's' && f.to === target);
       recalc();
-      if (flying) return result(true, 'Colony ship launched from ' + SKY.stars[flying.from][6] + '.', { sec: flying.dur, flying: true });
-      return result(true, 'Charter queued: the colony ship leaves as soon as a fleet slot is free and a neighbouring colony is yours.', { queued: true });
+      if (flying) return result(true, (takeover ? 'Takeover fleet launched from ' : 'Colony ship launched from ') + SKY.stars[flying.from][6] + '.', { sec: flying.dur, flying: true, takeover });
+      return result(true, 'Charter queued: the ' + (takeover ? 'takeover fleet' : 'colony ship') + ' leaves as soon as a fleet slot is free and a neighbouring colony is yours.', { queued: true, takeover });
     }
     function cancelOrder(id) {
       const k = S.orders.findIndex(o => o.id === id);
@@ -692,7 +834,7 @@
       const s = S.stars[i];
       const kinds = [];
       TRACKS.forEach(t => { if (s[t] < MAX_LEVEL) kinds.push('upgrade:' + t); });
-      if (adj[i].some(n => !S.stars[n.to])) kinds.push('expand');
+      if (adj[i].some(n => !S.stars[n.to] && S.owner[n.to] === undefined)) kinds.push('expand');
       if (s.s >= 0) kinds.push('collect');
       const k = kinds[randInt(kinds.length)];
       const p = { id: ++S.petitionSeq, star: i, type: k.split(':')[0], created: S.clock };
@@ -795,6 +937,7 @@
       let t = Infinity;
       for (const f of S.fleets) t = Math.min(t, f.remaining);
       if (S.tech.active) t = Math.min(t, S.tech.active.remaining);
+      for (const r of S.rivals) if (rivalReady(r)) t = Math.min(t, Math.max(r.cool, 1e-6));
       return t;
     }
     function accrue(dt) {
@@ -818,12 +961,16 @@
         S.fleets.splice(k, 1); changed = true;
         if (f.kind === 's') {
           if (!S.stars[f.to]) {
+            const was = S.owner[f.to];
             S.stars[f.to] = { t: nowFn(), s: 0, i: 0, r: 0, b: 0, o: 0 };
             S.stats.claimed++;
             const st = SKY.stars[f.to];
             const pf = profile[f.to];
-            log('Colonised ' + st[6] + ' (' + SKY.consts[st[5]].name + '), a class ' + pf.letter + ' star' + (pf.tier ? ' of ' + pf.tier.name.toLowerCase() + ' brightness' : '') + (isFlag[f.to] ? ' and a new flagship' : '') + '.', 'claim');
+            if (was !== undefined && S.rivals[was]) takeOver(f.to, was);
+            else log('Colonised ' + st[6] + ' (' + SKY.consts[st[5]].name + '), a class ' + pf.letter + ' star' + (pf.tier ? ' of ' + pf.tier.name.toLowerCase() + ' brightness' : '') + (isFlag[f.to] ? ' and a new flagship' : '') + '.', 'claim');
+            rivalsMeet(f.to);
             completePetitions({ type: 'claim', star: f.to });
+            rivalsEarn();
           }
         } else if (!S.messier[f.to]) {
           S.messier[f.to] = { t: nowFn() };
@@ -844,8 +991,10 @@
         accrue(step);
         for (const f of S.fleets) f.remaining -= step;
         if (S.tech.active) S.tech.active.remaining -= step;
+        for (const r of S.rivals) if (rivalReady(r)) r.cool -= step;
         S.clock += step; left -= step;
         arrive();
+        rivalsAct();
       }
       if (active) {
         S.active += dt;
@@ -890,10 +1039,15 @@
       if (n >= 100) return String(Math.round(n));
       return n.toFixed(n < 10 ? 1 : 0);
     }
-    function frontier() { // unclaimed stars adjacent to claimed ones
+    function frontier() { // free stars (no one holds them) adjacent to your colonies
       const out = new Set();
-      for (const i of D.claimed) for (const n of adj[i]) if (!S.stars[n.to]) out.add(n.to);
+      for (const i of D.claimed) for (const n of adj[i]) if (!S.stars[n.to] && S.owner[n.to] === undefined) out.add(n.to);
       return out;
+    }
+    function takeoverTargets() { // stars a rival holds next to your colonies (or to a ship's destination), cheapest first
+      const pend = targetsPending(), out = [];
+      for (const key of Object.keys(S.owner)) { const t = +key; if (!pend.has(t) && adj[t].some(n => S.stars[n.to] || pend.has(n.to))) out.push(t); }
+      return out.sort((a, b) => starPrice(a) - starPrice(b) || a - b);
     }
     function attention() { // stars worth a visit: flagships first, then the most cash waiting
       const out = [];
@@ -933,14 +1087,14 @@
     // ---- ordered lists shared by the panels and the keyboard shortcuts, so a key always does what the row it names does
     function expansionTargets(near) { // unclaimed stars a colony ship could be sent to (next to a colony or to a ship's destination), best-paying first
       const pend = targetsPending(), cand = new Set();
-      for (const i of D.claimed) for (const n of adj[i]) if (!S.stars[n.to] && !pend.has(n.to)) cand.add(n.to);
-      for (const p of pend) for (const n of adj[p]) if (!S.stars[n.to] && !pend.has(n.to)) cand.add(n.to);
+      for (const i of D.claimed) for (const n of adj[i]) if (!S.stars[n.to] && S.owner[n.to] === undefined && !pend.has(n.to)) cand.add(n.to);
+      for (const p of pend) for (const n of adj[p]) if (!S.stars[n.to] && S.owner[n.to] === undefined && !pend.has(n.to)) cand.add(n.to);
       let list = [...cand];
       if (near !== undefined && S.stars[near]) { // prefer the selected colony's own neighbours when it has any
         const mine = list.filter(t => adj[near].some(n => n.to === t));
         if (mine.length) list = mine;
       }
-      const worth = t => baseRate[t] * Math.max(0.2, 1 + profile[t].rev);
+      const worth = t => baseRate[t] * Math.max(0.2, 1 + profile[t].rev) / priceMul(t); // revenue for the money: the cheap stars first
       return list.sort((a, b) => worth(b) - worth(a) || a - b);
     }
     function messierTargets() { // Messier objects in reach that are not yet surveyed, brightest first
@@ -974,6 +1128,7 @@
       spawnEvent, redraw, useHint, eventReward, dismissPetition, addPetition,
       consStatus, frontier, attention, expansionTargets, messierTargets, buildOptions, messierStats, lvl, fmt, sepDeg,
       academy, academySync, academyLevels, Astro, now: () => nowFn(),
+      rivals, rivalOf, starPrice, starRank, takeoverTargets, isLeadStar: i => !!isLead[i], RIVAL_COLORS,
       serialize() { S.saved = nowFn(); return JSON.stringify(S); },
     };
   }

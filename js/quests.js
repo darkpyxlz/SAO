@@ -54,6 +54,9 @@
     const builtAll = () => peak('bld', blds().length);
     const builtKinds = () => peak('kinds', new Set(blds().map(b => b.id)).size);
     const builtAt = l => peak('bl' + l, blds().filter(b => b.lvl >= l).length);
+    const rivalCount = () => G.CFG.rivalCount;
+    const free = () => SKY.stars.length - G.d.count - G.rivals().reduce((n, r) => n + r.n, 0); // stars no one holds
+    const biggestRival = () => G.rivals().reduce((m, r) => Math.max(m, r.n), 0);
     const ZODIAC = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpius', 'Sagittarius', 'Capricornus', 'Aquarius', 'Pisces'];
     const zodiacColonised = () => ZODIAC.filter(n => G.consStatus(constIdx(n)).all).length;
 
@@ -85,6 +88,18 @@
     [[20, 6], [40, 15], [80, 30], [160, 70], [320, 160], [640, 320]].forEach(([n, m]) => add('price' + n, 'Corporation', 'Share price $' + n, 'Push your share price to $' + n + ' at its peak.', () => G.state.market.hi, n, m));
     add('rename', 'Corporation', 'Your name on the door', 'Give the company a name of your own (Corporation → Overview).', () => (G.state.corp.renamed ? 1 : 0), 1, 2);
     [[1, 15, 'Open for business', 'Keep the company running for a day.'], [7, 60, 'A week of trading', 'Your company is a week old.'], [30, 250, 'A month in business', 'Your company is a month old.'], [100, 800, 'Old money', 'Your company is 100 days old.']].forEach(([n, m, t, d]) => add('age' + n, 'Corporation', t, d, ageDays, n, m));
+    // ---- Rivals
+    add('contact1', 'Rivals', 'Border contact', 'Your territory touches a rival company’s. Rivals never attack, but they hold the stars they take (see the borders on the map, V).', () => G.state.rivals.filter(r => r.contact).length, 1, 15);
+    add('contact3', 'Rivals', 'Neighbours on every side', 'Touch the territory of every rival company.', () => G.state.rivals.filter(r => r.contact).length, rivalCount(), 45);
+    [[1, 10], [5, 30], [20, 70], [60, 160], [150, 350], [400, 800]].forEach(([n, m]) => add('take' + n, 'Rivals', n === 1 ? 'First takeover' : 'Take over ' + n + ' stars', 'Take over ' + S_(n, 'star', 'stars') + ' a rival company held. A star a rival holds costs ' + G.CFG.takeoverMul + ' times its price.', () => st().takeovers, n, m));
+    [[1, 90], [5, 300], [12, 900]].forEach(([n, m]) => add('tf' + n, 'Rivals', n === 1 ? 'A flagship from a rival' : 'Take ' + n + ' flagships from rivals', 'Take over ' + S_(n, 'flagship', 'flagships') + ' from the rival companies.', () => st().flagTakeovers, n, m));
+    add('cap1', 'Rivals', 'Capital gains', 'Take over a rival company’s headquarters.', () => st().capitals, 1, 110);
+    add('cap3', 'Rivals', 'Every capital', 'Take over the headquarters of every rival company.', () => st().capitals, rivalCount(), 500);
+    add('acq1', 'Rivals', 'A friendly acquisition', 'Acquire a rival: take over every star it holds, and it is out of the game.', () => st().acquired, 1, 300);
+    add('acq3', 'Rivals', 'Sole survivor', 'Acquire every rival company.', () => st().acquired, rivalCount(), 1500);
+    [[50, 60], [150, 200], [300, 500], [500, 1200]].forEach(([n, m]) => add('margin' + n, 'Rivals', 'Lead by ' + n, 'Hold ' + n + ' more stars than the biggest rival company.', () => peak('margin', G.d.count - biggestRival()), n, m));
+    add('full', 'Rivals', 'A full sky', 'Fill the sky: no star is left free, and every further star must be won by takeover.', () => SKY.stars.length - free(), SKY.stars.length, 60);
+
     // ---- Spectra: every spectral class and brightness tier
     const SP = G.Corp.SPECTRAL;
     const classQuests = { G: [[5, 30], [15, 60], [29, 160]], M: [[10, 40], [30, 90], [75, 220]], B: [[10, 25], [50, 80], [100, 150], [197, 350]], A: [[10, 25], [40, 80], [100, 160], [150, 300]], F: [[10, 30], [40, 100], [89, 250]], K: [[20, 40], [100, 140], [217, 400]] };
@@ -234,9 +249,10 @@
       return { id: d.id, kind: 'story', chapter: d.chapter, title: d.title, desc: d.desc, cur: Math.min(cur, d.target), target: d.target, done, claimed, reward: rewardFor(d.mins) };
     }
     // the chapters in the order a company meets them
-    const CHAPTERS = ['Expansion', 'Revenue', 'Corporation', 'Development', 'Technology', 'Buildings', 'Routes', 'Flagships', 'Spectra', 'Messier', 'Landmarks', 'Skies', 'Petitions', 'Sky School', 'Academy'];
+    const CHAPTERS = ['Expansion', 'Revenue', 'Corporation', 'Rivals', 'Development', 'Technology', 'Buildings', 'Routes', 'Flagships', 'Spectra', 'Messier', 'Landmarks', 'Skies', 'Petitions', 'Sky School', 'Academy'];
     const BLURB = {
       Expansion: 'A startup with one telescope and a dream. Every colony ship you send turns another point of light into a business.',
+      Rivals: 'Three rival companies follow your lead across the sky. They never attack, but they hold the stars they take: win them over, one takeover at a time.',
       Revenue: 'Cash is how a company keeps score. Collect it, let your treasury bank it, and watch the hourly numbers climb.',
       Corporation: 'Boards, shareholders and the press: the company grows up. Ranks come with colonies, and the share price with the market’s mood.',
       Development: 'A colony is only a claim until you build it up. Industry, Logistics and R&D, level by level, until whole constellations shine.',

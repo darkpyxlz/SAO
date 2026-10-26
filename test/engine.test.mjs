@@ -180,32 +180,37 @@ test('no unique powers: only Messier objects change global modifiers', () => {
   assert.equal(G.d.P.out, 0, 'no Royal Stars bonus');
 });
 
-test('pacing sketch: a casual bot (3 visits a day) colonises the whole sky in about three weeks', () => {
+test('pacing sketch: a casual bot (3 visits a day) fills the free sky in about a week, then takes the rest over in about five weeks in all', () => {
   const G = mk('Sirius', 11);
   const day = 86400;
   const snaps = {}; let doneDay = null;
-  for (let d = 1; d <= 45 && doneDay === null; d++) {
+  let fullDay = null;
+  for (let d = 1; d <= 60 && doneDay === null; d++) {
     for (let v = 0; v < 3; v++) {
       G.catchUp(day / 3);
       for (const i of G.d.claimed) G.collect(i);
       for (let guard = 0; guard < 80; guard++) {
         const cand = new Set(G.frontier());
-        for (const p of G.targetsPending()) for (const n of G.adj[p]) if (!G.state.stars[n.to]) cand.add(n.to);
-        const f = [...cand].filter(x => G.canLaunchTo(x).ok).sort((a, b) => SKY.stars[a][3] - SKY.stars[b][3]);
+        for (const p of G.targetsPending()) for (const n of G.adj[p]) if (!G.state.stars[n.to] && G.rivalOf(n.to) < 0) cand.add(n.to);
+        const free = [...cand].filter(x => G.canLaunchTo(x).ok).sort((a, b) => G.starPrice(a) - G.starPrice(b));
+        const grab = G.takeoverTargets().filter(x => G.canLaunchTo(x).ok); // once the free stars are gone, take over the cheapest rival star
         const ups = [];
         for (const i of G.d.claimed) for (const tr of ['r', 'b']) if (G.state.stars[i][tr] < 5) ups.push([i, tr, G.upgradeCost(i, tr)]);
         ups.sort((a, b) => a[2] - b[2]);
         const cc = G.claimCost();
-        if (f.length && G.state.cash >= cc) { G.launch(f[0]); continue; }
+        if (free.length) { if (G.launch(free[0]).ok) continue; }
+        else if (grab.length && G.launch(grab[0]).ok) continue;
         if (ups[0] && G.state.cash >= ups[0][2] && ups[0][2] < cc * 0.4) { G.upgrade(ups[0][0], ups[0][1]); continue; }
         break;
       }
     }
     if ([1, 3, 7, 10].includes(d)) snaps[d] = G.d.count;
+    if (fullDay === null && G.state.stars && SKY.stars.every((s, i) => G.state.stars[i] || G.rivalOf(i) >= 0)) fullDay = d;
     if (G.d.count + G.targetsPending().size >= SKY.stars.length) doneDay = d;
   }
-  console.log('\nstars after day 1/3/7/10:', JSON.stringify(snaps), 'all claimed by day', doneDay);
-  assert.ok(doneDay !== null && doneDay >= 14 && doneDay <= 35, 'finished on day ' + doneDay);
+  console.log('\nstars after day 1/3/7/10:', JSON.stringify(snaps), 'no free star left on day', fullDay, 'all claimed by day', doneDay);
+  assert.ok(fullDay !== null && fullDay >= 5 && fullDay <= 14, 'the free sky is gone on day ' + fullDay);
+  assert.ok(doneDay !== null && doneDay >= 22 && doneDay <= 50, 'finished on day ' + doneDay);
 });
 
 // ---------------------------------------------------------------- Sky School
@@ -792,7 +797,8 @@ test('quests: a fully built and fully studied sky completes every story quest, a
   // every kind of building at level 3 on enough colonies, without going through the slot rules
   G.d.claimed.forEach(i => { S.buildings[i] = kinds.map(id => ({ id, lvl: 3, t: 0, paid: { cash: 0, research: 0 } })); });
   for (let e = 0; e < 30; e++) S.routeLvl[e] = 3;
-  Object.assign(S.stats, { collected: 2e11, auto: 1e11, upgrades: 1e4, eventsDone: 100, perfect: 50, restoredRoutes: 500, petitionsDone: 200, collects: 2e4, routeUps: 1000, flagCollects: 2000, flagCash: 1e10, marketEvents: 100 });
+  Object.assign(S.stats, { collected: 2e11, auto: 1e11, upgrades: 1e4, eventsDone: 100, perfect: 50, restoredRoutes: 500, petitionsDone: 200, collects: 2e4, routeUps: 1000, flagCollects: 2000, flagCash: 1e10, marketEvents: 100, takeovers: 500, flagTakeovers: 20, capitals: 3, acquired: 3 });
+  S.rivals.forEach(r => { r.contact = true; });
   Object.assign(S.quiz.stats, { answered: 6000, correct: 5000, rounds: 500, perfect: 200, bestStreak: 99 });
   const rec = () => ({ ok: 3000, bad: 0, last: 0, box: 10, due: 0, learned: 1 });
   for (let k = 0; k < SKY.consts.length; k++) S.quiz.const[k] = rec();
@@ -823,6 +829,192 @@ test('quests: a fully built and fully studied sky completes every story quest, a
   assert.ok(all.chapters.length >= 12);
 });
 
+// ---------------------------------------------------------------- prices and rival companies
+const fresh = { t: 0, s: 0, i: 0, r: 0, b: 0, o: 0 };
+const rivalStarNextTo = (G, star) => { // plant a rival-held star beside one of yours, as if a rival had grown that way
+  const x = G.adj[star].map(n => n.to).find(t => !G.state.stars[t] && G.rivalOf(t) < 0);
+  G.state.owner[x] = 0; G.recalc();
+  return x;
+};
+
+test('prices: ordinary stars are cheap, constellation leaders and flagships are dear, a rival\'s stars cost more to take over', () => {
+  const G = mk('Sirius', 3);
+  const kinds = {};
+  SKY.stars.forEach((s, i) => { const r = G.starRank(i); (kinds[r.kind] = kinds[r.kind] || []).push(i); });
+  assert.equal(kinds.flagship.length, 20);
+  assert.ok(kinds.lead.length >= 90 && kinds.lead.length <= 125, 'leads: ' + kinds.lead.length);
+  assert.ok(kinds.ordinary.length > 450 && kinds.bright.length > 60 && kinds.brilliant.length > 5);
+  SKY.stars.forEach((s, i) => assert.equal(G.starRank(i).kind === 'flagship', !!s[7], 'flagships are the named stars'));
+  // every constellation's brightest star, and every alpha, is a lead (or a flagship)
+  SKY.consts.forEach(c => {
+    const b = c.stars.reduce((m, i) => (SKY.stars[i][3] < SKY.stars[m][3] ? i : m), c.stars[0]);
+    assert.ok(['lead', 'flagship'].includes(G.starRank(b).kind), c.name + ' leads with ' + SKY.stars[b][6]);
+  });
+  SKY.stars.forEach((s, i) => { if (/^α/.test(s[6])) assert.ok(['lead', 'flagship'].includes(G.starRank(i).kind), s[6]); });
+  // the price rises with importance, follows the multiplier exactly, and an ordinary star costs less than the going rate
+  G.state.cash = 1e9;
+  const rate = G.claimCost();
+  const pick = k => kinds[k].find(i => !G.state.stars[i] && G.rivalOf(i) < 0);
+  const rows = ['ordinary', 'bright', 'brilliant', 'lead', 'flagship'].map(k => [k, G.starPrice(pick(k)), G.starRank(pick(k)).mul]);
+  for (let k = 1; k < rows.length; k++) assert.ok(rows[k][1] > rows[k - 1][1], rows[k][0] + ' costs more than ' + rows[k - 1][0]);
+  rows.forEach(([k, price, mul]) => assert.equal(price, Math.ceil(rate * mul), k + ' follows its multiplier'));
+  assert.ok(rows[0][1] < rate && rows[4][1] >= rate * 5, 'ordinary below the going rate, a flagship several times it');
+  // a rival's star costs the takeover premium on top of its own price
+  const cap = G.rivals()[0].home;
+  assert.equal(G.rivalOf(cap), 0);
+  assert.equal(G.starPrice(cap), Math.ceil(rate * G.starRank(cap).mul * G.CFG.takeoverMul));
+  assert.ok(G.starPrice(cap) > G.starPrice(pick('flagship')) * 2);
+  // buying more stars raises the going rate for everything
+  const before = G.starPrice(pick('ordinary'));
+  G.state.cash = 1e12; for (const t of G.expansionTargets().slice(0, 6)) G.launch(t);
+  assert.ok(G.starPrice(pick('ordinary')) > before);
+});
+
+test('rivals: three companies start on far-apart flagships of their own, with names and colours', () => {
+  for (const home of ['Sirius', 'Polaris', 'Vega', 'Acrux']) {
+    const G = mk(home, 5);
+    const R = G.rivals();
+    assert.equal(R.length, 3);
+    const caps = [G.state.home, ...R.map(r => r.home)];
+    assert.equal(new Set(caps).size, 4, 'four different headquarters');
+    R.forEach(r => { assert.ok(G.isFlagship(r.home), 'a rival starts on a flagship'); assert.equal(G.rivalOf(r.home), r.id); assert.equal(r.n, 1); assert.ok(r.name && /^#[0-9a-f]{6}$/i.test(r.color)); });
+    assert.equal(new Set(R.map(r => r.name)).size, 3);
+    assert.equal(new Set(R.map(r => r.color)).size, 3);
+    for (let a = 0; a < caps.length; a++) for (let b = a + 1; b < caps.length; b++) assert.ok(Engine.sepDeg(SKY.stars[caps[a]], SKY.stars[caps[b]]) > 60, home + ': headquarters at least 60 degrees apart');
+    assert.ok(!G.state.stars[R[0].home] && G.frontier().size > 0);
+  }
+});
+
+test('rivals: they expand at a share of YOUR pace, only while you do, and never take what you hold or are sailing to', () => {
+  const G = mk('Sirius', 7);
+  G.state.cash = 1e13;
+  const idle = JSON.stringify(G.state.owner);
+  G.catchUp(1e6); G.tick(5e4, true);
+  assert.equal(JSON.stringify(G.state.owner), idle, 'a company that is not growing leaves its rivals where they are');
+  for (let round = 0; round < 40; round++) {
+    for (const t of G.expansionTargets().slice(0, 5)) assert.ok(G.launch(t).ok);
+    G.catchUp(4000);
+    const stars = Object.keys(G.state.stars).map(Number);
+    assert.ok(stars.every(i => G.rivalOf(i) < 0 && G.state.owner[i] === undefined), 'no star is both yours and a rival\'s');
+  }
+  const me = G.d.count, R = G.rivals();
+  assert.ok(me > 150, 'you grew: ' + me);
+  R.forEach(r => {
+    const want = r.ratio * (me - 1) + 1;
+    assert.ok(Math.abs(r.n - want) <= Math.max(8, want * 0.15), r.name + ' holds ' + r.n + ', expected about ' + want.toFixed(0) + ' for your ' + me);
+    assert.ok(r.touching || r.n > 0);
+  });
+  assert.equal(Object.keys(G.state.owner).length, R.reduce((a, r) => a + r.n, 0), 'the books balance');
+  // rivals only ever hold stars next to what they already hold (or, rarely, a sail away)
+  const first = R[0], mineOf = id => Object.keys(G.state.owner).filter(k => G.state.owner[k] === id).map(Number);
+  const owned = mineOf(first.id);
+  const connected = new Set([first.home]); let grew = true;
+  while (grew) { grew = false; for (const i of owned) if (!connected.has(i) && G.adj[i].some(n => connected.has(n.to))) { connected.add(i); grew = true; } }
+  assert.ok(connected.size >= owned.length * 0.9, 'a rival\'s territory is (nearly) one connected piece: ' + connected.size + ' of ' + owned.length);
+  // a star with your ship bound for it is never taken from under you
+  const H = mk('Sirius', 9);
+  H.state.cash = 1e13;
+  const t = H.expansionTargets()[0];
+  assert.ok(H.launch(t).ok);
+  H.state.fleets.forEach(f => { f.remaining = 1e9; f.dur = 1e9; });
+  for (const r of H.state.rivals) { r.credit = 9; r.cool = 0; }
+  H.tick(5e5, false);
+  assert.equal(H.rivalOf(t), -1, 'the star a ship is bound for stays free');
+  assert.ok(H.rivals().some(r => r.n > 1), 'the rivals did expand meanwhile');
+});
+
+test('takeovers: pay the premium, the star changes hands, and the books, log and counters say so', () => {
+  const G = mk('Sirius', 4);
+  const S = G.state, home = S.home;
+  const x = rivalStarNextTo(G, home);
+  assert.equal(G.rivalOf(x), 0);
+  assert.ok(!G.frontier().has(x) && !G.expansionTargets().includes(x), 'a rival\'s star is not a free star');
+  assert.ok(G.takeoverTargets().includes(x));
+  const price = G.starPrice(x), rate = G.claimCost();
+  assert.equal(price, Math.ceil(rate * G.starRank(x).mul * G.CFG.takeoverMul));
+  S.cash = price - 1;
+  assert.ok(!G.canLaunchTo(x).ok && /cash/i.test(G.canLaunchTo(x).msg));
+  S.cash = price + 5;
+  const r = G.launch(x);
+  assert.ok(r.ok && r.takeover && /takeover/i.test(r.msg), r.msg);
+  assert.equal(S.cash, 5, 'paid exactly the price');
+  assert.ok(!G.takeoverTargets().includes(x), 'a ship is already bound there');
+  const held = S.rivals[0].n;
+  G.catchUp(r.sec + 1);
+  assert.ok(S.stars[x], 'the star is yours');
+  assert.equal(G.rivalOf(x), -1); assert.equal(S.owner[x], undefined);
+  assert.equal(S.rivals[0].n, held - 1); assert.equal(S.rivals[0].lost, 1);
+  assert.equal(S.stats.takeovers, 1); assert.equal(S.stats.claimed, 1);
+  assert.ok(S.log.some(l => l.kind === 'claim' && /Took over/.test(l.text) && l.text.includes(S.rivals[0].name)));
+  // a cancelled takeover charter is refunded in full
+  const y = rivalStarNextTo(G, x);
+  S.cash = G.starPrice(y); S.fleets.length = 0; S.orders.length = 0;
+  assert.ok(G.launch(y).ok);
+  const o = S.orders[0] || null; const cash0 = S.cash;
+  if (o) { assert.ok(G.cancelOrder(o.id).ok); assert.equal(S.cash, cash0 + o.paid); }
+});
+
+test('takeovers: a headquarters counts, and a rival with no star left is acquired and stops growing', () => {
+  const G = mk('Sirius', 6);
+  const S = G.state, R0 = S.rivals[0], cap = R0.home;
+  // you hold a star beside their headquarters; they hold nothing else
+  const nb = G.adj[cap][0].to;
+  S.stars[nb] = { ...fresh }; for (const k of Object.keys(S.owner)) if (S.owner[k] === 0 && +k !== cap) delete S.owner[k];
+  G.recalc();
+  assert.equal(R0.n, 1);
+  S.cash = 1e13;
+  const r = G.launch(cap);
+  assert.ok(r.ok, r.msg);
+  G.catchUp(r.sec + 1);
+  assert.ok(S.stars[cap] && G.rivalOf(cap) === -1);
+  assert.equal(S.stats.capitals, 1); assert.equal(S.stats.acquired, 1);
+  assert.equal(R0.n, 0);
+  assert.ok(S.log.some(l => /headquarters/.test(l.text)) && S.log.some(l => /acquired/.test(l.text)));
+  assert.ok(G.rivals()[0].out);
+  const others = G.rivals().filter(r => r.id !== 0);
+  for (const r2 of S.rivals) { r2.credit = 8; r2.cool = 0; }
+  const before = Object.keys(S.owner).filter(k => S.owner[k] === 0).length;
+  G.catchUp(1e5);
+  assert.equal(Object.keys(S.owner).filter(k => S.owner[k] === 0).length, before, 'an acquired company does not come back');
+  assert.ok(others.length === 2 && G.rivals().filter(r2 => r2.id !== 0).some(r2 => r2.n > 1), 'the others carry on');
+});
+
+test('rivals fill every free star eventually, then stop; a rival with no free neighbour sails to the nearest free star', () => {
+  const G = mk('Sirius', 8);
+  const S = G.state;
+  // surround rival 0 completely with its own and other rivals' stars except far away: hand it a lot of credit
+  for (const r of S.rivals) { r.credit = 10; r.cool = 0; }
+  for (let k = 0; k < 400; k++) { for (const r of S.rivals) { r.credit = 10; r.cool = 0; } G.tick(30, false); }
+  const free = SKY.stars.filter((s, i) => !S.stars[i] && G.rivalOf(i) < 0).length;
+  const total = G.rivals().reduce((a, r) => a + r.n, 0) + G.d.count + free;
+  assert.equal(total, SKY.stars.length, 'every star is yours, a rival\'s or free');
+  assert.ok(free <= 20, 'rivals ran out of free stars: ' + free + ' left (a few stay out of reach of your colonies)');
+  // nothing left to take: they are stuck and the clock does not spin
+  const t0 = Date.now(); G.catchUp(5e6); assert.ok(Date.now() - t0 < 2000, 'a stuck rival costs no time');
+});
+
+test('rivals survive a save, play out identically from the same save, and an older save founds them to match your progress', () => {
+  const G = mk('Sirius', 12);
+  G.state.cash = 1e13;
+  for (let round = 0; round < 12; round++) { for (const t of G.expansionTargets().slice(0, 5)) G.launch(t); G.catchUp(3000); }
+  const json = G.serialize();
+  const A = Engine.create(SKY, { rng: seeded(1), now: () => 1e12 }), B = Engine.create(SKY, { rng: seeded(2), now: () => 1e12 });
+  A.load(JSON.parse(json)); B.load(JSON.parse(json));
+  assert.deepEqual(A.rivals(), G.rivals());
+  assert.deepEqual(A.state.owner, G.state.owner);
+  for (const H of [A, B]) { H.state.cash = 1e13; for (const t of H.expansionTargets().slice(0, 4)) H.launch(t); H.catchUp(4000); }
+  assert.deepEqual(A.state.owner, B.state.owner, 'the rivals use their own saved random stream');
+  // a version-5 save has no rivals: loading founds them, already grown to their share
+  const old = JSON.parse(json);
+  old.version = 5; delete old.rivals; delete old.owner; delete old.rseed;
+  const H = Engine.create(SKY, { rng: seeded(3), now: () => 1e12 });
+  H.load(old);
+  assert.equal(H.state.version, Engine.SAVE_VERSION);
+  assert.equal(H.rivals().length, 3);
+  H.rivals().forEach(r => { const want = r.ratio * (H.d.count - 1) + 1; assert.ok(Math.abs(r.n - want) <= Math.max(4, want * 0.1), r.name + ' has ' + r.n + ', expected about ' + want.toFixed(0)); });
+  assert.ok(Object.keys(H.state.owner).every(k => !H.state.stars[k]));
+});
+
 test('saves from v2 (before hubs and quests) load and gain the new fields', () => {
   const G = mk();
   const old = JSON.parse(G.serialize());
@@ -842,11 +1034,12 @@ test('shortcut helpers: expansion targets, Messier targets and numbered building
   const G = mk();
   const home = G.state.home, S = G.state;
   G.state.cash = 1e6; G.state.research = 1e6;
-  // expansion targets: unclaimed neighbours of colonies, best-paying first, never claimed or already bound for
+  // expansion targets: free neighbours of colonies, best revenue for the money first, never claimed, held by a rival or already bound for
   let t = G.expansionTargets();
   assert.ok(t.length > 0);
   assert.ok(t.every(x => !S.stars[x]));
-  for (let k = 1; k < t.length; k++) assert.ok(G.baseRate[t[k - 1]] >= G.baseRate[t[k]], 'sorted by base revenue');
+  const worth = x => G.baseRate[x] * Math.max(0.2, 1 + G.profileOf(x).rev) / G.starRank(x).mul;
+  for (let k = 1; k < t.length; k++) assert.ok(worth(t[k - 1]) >= worth(t[k]), 'sorted by revenue for the money');
   assert.deepEqual(new Set(t), G.frontier(), 'with no ships out these are exactly the frontier');
   const best = t[0];
   assert.ok(G.launch(best).ok);

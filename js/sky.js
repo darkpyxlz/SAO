@@ -230,6 +230,60 @@
       }
     }
 
+    // ---- empires: every held star owns the ground nearest to it (limited to a reach around the star). The ground is tinted in its
+    // owner's colour and the edge of an empire, against free sky or another empire, is drawn just inside its own ground.
+    const REACH = 0.3, PLAYER_RGB = [143, 180, 255];
+    let cells = null;
+    const hexRGB = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+    function drawTerritories(S) {
+      if (!cells) cells = Territory.build(sra.map((r, i) => [r, sY[i]]), { w: TAU, h: YP, reach: REACH });
+      const rgb = [PLAYER_RGB].concat((S.rivals || []).map(r => hexRGB(r.color)));
+      const own = k => (S.stars[k] ? 0 : S.owner && S.owner[k] !== undefined ? S.owner[k] + 1 : -1);
+      const pad = REACH * scale + 6, spots = rgb.map(() => []);
+      for (let i = 0; i < N; i++) {
+        const o = own(i);
+        if (o < 0 || o >= rgb.length) continue;
+        for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+          const X = sx[i] + ox * TAU * scale, Y = sy[i] + oy * YP * scale;
+          if (X < -pad || X > W + pad || Y < -pad || Y > H + pad) continue;
+          spots[o].push(i, X, Y);
+        }
+      }
+      const inset = 1.6;
+      for (let o = 0; o < rgb.length; o++) {
+        const list = spots[o];
+        if (!list.length) continue;
+        const col = rgb[o].join(',');
+        const fill = new Path2D(), edge = new Path2D(), reach = new Path2D();
+        for (let q = 0; q < list.length; q += 3) {
+          const i = list[q], X = list[q + 1], Y = list[q + 2], c = cells[i], n = c.x.length;
+          for (let k = 0; k < n; k++) {
+            const x = X - c.x[k] * scale, y = Y - c.y[k] * scale;
+            if (k) fill.lineTo(x, y); else fill.moveTo(x, y);
+          }
+          fill.closePath();
+          for (let k = 0; k < n; k++) {
+            const tag = c.tag[k];
+            if (tag >= 0 && own(tag) === o) continue; // the inside of an empire has no border
+            const k2 = k + 1 === n ? 0 : k + 1;
+            const xa = X - c.x[k] * scale, ya = Y - c.y[k] * scale, xb = X - c.x[k2] * scale, yb = Y - c.y[k2] * scale;
+            let nx = ya - yb, ny = xb - xa;
+            const L = Math.hypot(nx, ny);
+            if (L < 0.4) continue;
+            if (tag < 0) { reach.moveTo(xa, ya); reach.lineTo(xb, yb); continue; } // where the reach of a lone star ends
+            if ((X - xa) * nx + (Y - ya) * ny < 0) { nx = -nx; ny = -ny; } // inwards, towards the star
+            const ix = nx / L * inset, iy = ny / L * inset;
+            edge.moveTo(xa + ix, ya + iy); edge.lineTo(xb + ix, yb + iy);
+          }
+        }
+        ctx.fillStyle = 'rgba(' + col + ',' + (o === 0 ? 0.11 : 0.09) + ')'; ctx.fill(fill);
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        if (v.zoom > 0.6) { ctx.strokeStyle = 'rgba(' + col + ',.14)'; ctx.lineWidth = 6; ctx.stroke(edge); }
+        ctx.strokeStyle = 'rgba(' + col + ',.28)'; ctx.lineWidth = 1; ctx.stroke(reach);
+        ctx.strokeStyle = 'rgba(' + col + ',.9)'; ctx.lineWidth = o === 0 ? 2 : 1.6; ctx.stroke(edge);
+      }
+    }
+
     function render(t, ui) {
       if (!W) return;
       stepAnim();
@@ -272,6 +326,8 @@
         mx[i] = px(mra[i]); my[i] = py(mY[i]);
         mvis[i] = mx[i] > -30 && mx[i] < W + 30 && my[i] > -30 && my[i] < H + 30 ? 1 : 0;
       }
+
+      if (ui.borders !== false) drawTerritories(S);
 
       const evHot = new Set(), evEdges = new Set();
       for (const ev of S.events) for (const e of ev.edges) if (!ev.restored.includes(e)) { evEdges.add(e); evHot.add(SKY.edges[e][0]); evHot.add(SKY.edges[e][1]); }
@@ -348,6 +404,7 @@
       for (let i = 0; i < N; i++) {
         if (!svis[i]) continue;
         const st = SKY.stars[i], mag = st[3], claimed = !!S.stars[i];
+        const rv = !claimed && S.owner && S.owner[i] !== undefined ? S.owner[i] : -1; // held by a rival company
         const r = Math.max(1.8, (4.6 - 0.6 * mag)) * zs;
         const x = sx[i], y = sy[i];
         const rgb = starRGB[i];
@@ -356,8 +413,18 @@
           g.addColorStop(0, 'rgba(' + rgb.join(',') + ',.55)'); g.addColorStop(1, 'rgba(' + rgb.join(',') + ',0)');
           ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r * 4.2, 0, TAU); ctx.fill();
         }
-        ctx.fillStyle = claimed ? starCol[i] : 'rgba(' + rgb.join(',') + ',.55)';
+        ctx.fillStyle = claimed || rv >= 0 ? starCol[i] : 'rgba(' + rgb.join(',') + ',.55)';
         ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+        if (rv >= 0 && S.rivals[rv]) {
+          const rc = hexRGB(S.rivals[rv].color).join(','), g2 = ctx.createRadialGradient(x, y, 0, x, y, r * 3.4);
+          g2.addColorStop(0, 'rgba(' + rc + ',.4)'); g2.addColorStop(1, 'rgba(' + rc + ',0)');
+          ctx.fillStyle = g2; ctx.beginPath(); ctx.arc(x, y, r * 3.4, 0, TAU); ctx.fill();
+          ctx.strokeStyle = 'rgba(' + rc + ',.85)'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, TAU); ctx.stroke();
+          if (ui.takeover && ui.takeover.has(i)) { // within reach of a takeover: a dashed ring that turns
+            ctx.strokeStyle = 'rgba(' + rc + ',.95)'; ctx.lineWidth = 1.4; ctx.setLineDash([3, 3]); ctx.lineDashOffset = -t / 80;
+            ctx.beginPath(); ctx.arc(x, y, r + 8 + 1.2 * Math.sin(t / 420 + i), 0, TAU); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset = 0;
+          }
+        }
         if (claimed) {
           const s = S.stars[i];
           const lv = s.r + s.b + s.o;
@@ -414,6 +481,12 @@
         // labels: proper names for the important stars, official designations when zoomed in
         const showLabel = st[7] ? v.zoom > 0.85 : claimed ? v.zoom > 2.4 : v.zoom > 5;
         if (showLabel) text(st[6], x + r + 4, y + 4, st[7] ? 12 : 10.5, claimed || st[7] ? 'rgba(235,240,255,.92)' : 'rgba(170,185,230,.55)', 'left', st[7] ? '500' : '');
+      }
+
+      // headquarters: every company's name above its home star while the map is wide
+      if (v.zoom < 4 && ui.borders !== false) {
+        const hq = [[S.home, S.corp.name, 'rgb(' + PLAYER_RGB.join(',') + ')']].concat((S.rivals || []).filter(r => r.n > 0).map(r => [r.home, r.name, r.color]));
+        for (const [i, name, col] of hq) if (svis[i] && (i === S.home || !S.stars[i])) text(name, sx[i], sy[i] - 16, v.zoom < 1 ? 10 : 11.5, col, 'center', '600');
       }
 
       // fleets (drawn on the nearest world copy)
